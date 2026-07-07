@@ -11,6 +11,7 @@ from poker_domain.game_state import (
     WaitingFor,
     PlayerState,
     TableStatus,
+    Pot,
 )
 from poker_domain.player import Player
 from poker_domain.deck import Deck
@@ -41,10 +42,18 @@ class PokerTable(PokerTableInterface):
         timeout_seconds: int = 30,
         blind_schedule: list[tuple[int, int]] | None = None,
         ante_schedule: list[int] | None = None,
+        rake_percent: float = 0.0,
+        rake_cap: int | None = None,
+        rake_min_pot: int | None = None,
     ) -> None:
         self._table_id = table_id
         self._max_players = max_players
         self._timeout_seconds = timeout_seconds
+
+        # レーキ設定 (ショーダウンで決着したポットにのみ適用。不戦勝には適用しない)
+        self._rake_percent = rake_percent
+        self._rake_cap = rake_cap
+        self._rake_min_pot = rake_min_pot
 
         # ブラインドレベル: [(small_blind, big_blind), ...]。未指定時は固定額の単一レベル
         self._blind_schedule: list[tuple[int, int]] = blind_schedule or [(small_blind, big_blind)]
@@ -253,9 +262,7 @@ class PokerTable(PokerTableInterface):
                 if player.current_bet < self._current_bet:
                     raise InvalidActionError("ベット額が足りません。コールが必要です")
             case Call():
-                diff = self._current_bet.amount - player.current_bet.amount
-                if player.chips.amount < diff:
-                    raise InsufficientChipsError("チップ不足です")
+                pass  # チップが足りない場合は保有額全額でのオールインコールとして成立させる
             case Bet(amount=amount):
                 if self._current_bet.amount > 0:
                     raise InvalidActionError("既にベットがある場合は Raise を使ってください")
@@ -283,9 +290,14 @@ class PokerTable(PokerTableInterface):
                 self._players_to_act.discard(self._current_player_index)
 
             case Call():
-                diff = self._current_bet.amount - player.current_bet.amount
+                # 不足していれば保有チップ全額でのオールインコールとする (サイドポットの発生源)
+                diff = min(
+                    self._current_bet.amount - player.current_bet.amount,
+                    player.chips.amount,
+                )
                 player.chips = Chips(player.chips.amount - diff)
-                player.current_bet = self._current_bet
+                player.current_bet = player.current_bet + Chips(diff)
+                player.total_contributed = player.total_contributed + Chips(diff)
                 self._pot = self._pot + Chips(diff)
                 self._players_to_act.discard(self._current_player_index)
                 if player.chips.amount == 0:
@@ -294,6 +306,7 @@ class PokerTable(PokerTableInterface):
             case Bet(amount=amount):
                 player.chips = Chips(player.chips.amount - amount)
                 player.current_bet = Chips(amount)
+                player.total_contributed = player.total_contributed + Chips(amount)
                 self._current_bet = Chips(amount)
                 self._pot = self._pot + Chips(amount)
                 if player.chips.amount == 0:
@@ -308,6 +321,7 @@ class PokerTable(PokerTableInterface):
                 diff = amount - player.current_bet.amount
                 player.chips = Chips(player.chips.amount - diff)
                 player.current_bet = Chips(amount)
+                player.total_contributed = player.total_contributed + Chips(diff)
                 self._current_bet = Chips(amount)
                 self._pot = self._pot + Chips(diff)
                 if player.chips.amount == 0:
@@ -338,6 +352,7 @@ class PokerTable(PokerTableInterface):
         amount = min(blind.amount, player.chips.amount)
         player.chips = Chips(player.chips.amount - amount)
         player.current_bet = Chips(amount)
+        player.total_contributed = player.total_contributed + Chips(amount)
         self._pot = self._pot + Chips(amount)
         if player.chips.amount == 0:
             player.is_all_in = True
@@ -350,6 +365,7 @@ class PokerTable(PokerTableInterface):
         for player in self._players:
             amount = min(self._ante.amount, player.chips.amount)
             player.chips = Chips(player.chips.amount - amount)
+            player.total_contributed = player.total_contributed + Chips(amount)
             self._pot = self._pot + Chips(amount)
             if player.chips.amount == 0:
                 player.is_all_in = True
@@ -471,13 +487,20 @@ class PokerTable(PokerTableInterface):
     # ── 勝敗 ──
 
     def _finish_as_winner(self, winner: Player, events: list[GameEvent]) -> ActionResult:
-        """全員フォールドで勝ち"""
-        winner.chips = winner.chips + self._pot
+        """全員フォールドで不戦勝。サイドポットの偏りに関わらず残ったポット全額を獲得し、レーキは取らない"""
+        payout = self._pot
+        winner.chips = winner.chips + payout
         self._pot = Chips(0)
+        self._reset_contributions()
         self._phase = GamePhase.SHOWDOWN
         events.append(GameEvent(
             event_type=EventType.SHOWDOWN,
-            payload={"winner_id": winner.player_id, "hands": {}},
+            payload={
+                "winner_id": winner.player_id,
+                "hands": {},
+                "payouts": {winner.player_id: payout.amount},
+                "rake": 0,
+            },
         ))
         self._close_if_finished(events)
         return ActionResult(
@@ -487,29 +510,41 @@ class PokerTable(PokerTableInterface):
         )
 
     def _showdown(self, events: list[GameEvent]) -> ActionResult:
-        """RIVER後のショーダウン"""
+        """RIVER後のショーダウン。サイドポットごとに勝者を判定して分配し、レーキを控除する"""
         self._phase = GamePhase.SHOWDOWN
         in_hand = self._get_in_hand_players()
 
-        best_player: Player | None = None
-        best_hand = None
-        hands_log: dict[str, object] = {}
+        hands_log: dict[str, object] = {
+            player.player_id: HandEvaluator.evaluate(player.hole_cards + self._community_cards)
+            for player in in_hand
+        }
 
-        for player in in_hand:
-            all_cards = player.hole_cards + self._community_cards
-            hand = HandEvaluator.evaluate(all_cards)
-            hands_log[player.player_id] = hand
-            if best_hand is None or HandEvaluator.compare(hand, best_hand) > 0:
-                best_hand = hand
-                best_player = player
+        raw_pots = self._compute_pots()
+        pots, rake = self._apply_rake(raw_pots)
 
-        # TODO: スプリットポット (同じ強さの場合) は未対応
-        best_player.chips = best_player.chips + self._pot  # type: ignore
+        payouts: dict[str, int] = {}
+        for pot in pots:
+            for player_id, amount in self._distribute_pot(pot, hands_log).items():
+                payouts[player_id] = payouts.get(player_id, 0) + amount
+
+        for player in self._players:
+            won = payouts.get(player.player_id, 0)
+            if won:
+                player.chips = player.chips + Chips(won)
+
         self._pot = Chips(0)
+        self._reset_contributions()
 
+        winner_id = max(payouts, key=payouts.get) if payouts else None
         events.append(GameEvent(
             event_type=EventType.SHOWDOWN,
-            payload={"winner_id": best_player.player_id, "hands": hands_log},  # type: ignore
+            payload={
+                "winner_id": winner_id,
+                "hands": hands_log,
+                "pots": pots,
+                "payouts": payouts,
+                "rake": rake,
+            },
         ))
         self._close_if_finished(events)
         return ActionResult(
@@ -517,6 +552,101 @@ class PokerTable(PokerTableInterface):
             events=tuple(events),
             waiting_for=None,
         )
+
+    # ── サイドポット計算 ──
+
+    def _compute_pots(self) -> tuple[Pot, ...]:
+        """各プレイヤーの累計拠出額からメインポット/サイドポットを算出する"""
+        contributions = [
+            (p, p.total_contributed.amount) for p in self._players if p.total_contributed.amount > 0
+        ]
+        if not contributions:
+            return ()
+
+        levels = sorted({amount for _, amount in contributions})
+        pots: list[Pot] = []
+        prev_level = 0
+        for level in levels:
+            tier = level - prev_level
+            prev_level = level
+            if tier <= 0:
+                continue
+            contributors = [p for p, amount in contributions if amount >= level]
+            eligible = tuple(p.player_id for p in contributors if not p.folded)
+            pots.append(Pot(amount=Chips(tier * len(contributors)), eligible_player_ids=eligible))
+        return tuple(pots)
+
+    def _distribute_pot(self, pot: Pot, hands: dict[str, object]) -> dict[str, int]:
+        """1つのポットについて、対象者内で最強のハンドに (同点なら等分で) 配る"""
+        eligible = [p for p in self._players if p.player_id in pot.eligible_player_ids]
+        if not eligible:
+            return {}
+
+        best_hand = None
+        winners: list[Player] = []
+        for player in eligible:
+            hand = hands[player.player_id]
+            if best_hand is None:
+                best_hand, winners = hand, [player]
+                continue
+            cmp = HandEvaluator.compare(hand, best_hand)  # type: ignore[arg-type]
+            if cmp > 0:
+                best_hand, winners = hand, [player]
+            elif cmp == 0:
+                winners.append(player)
+
+        share, remainder = divmod(pot.amount.amount, len(winners))
+        payouts = {p.player_id: share for p in winners}
+        if remainder:
+            # 端数チップはディーラーの次の座席から順に、勝者の間で1枚ずつ配る
+            ordered = self._order_from_dealer(winners)
+            for i in range(remainder):
+                winner_id = ordered[i % len(ordered)].player_id
+                payouts[winner_id] += 1
+        return payouts
+
+    def _order_from_dealer(self, players: list[Player]) -> list[Player]:
+        """ディーラーの次の座席から時計回りの順に並べ替える"""
+        n = len(self._players)
+        seat_index = {id(p): i for i, p in enumerate(self._players)}
+
+        def seat_distance(p: Player) -> int:
+            return (seat_index[id(p)] - self._dealer_index - 1) % n
+
+        return sorted(players, key=seat_distance)
+
+    # ── レーキ ──
+
+    def _calculate_rake(self, pot_amount: int) -> int:
+        if pot_amount <= 0 or self._rake_percent <= 0:
+            return 0
+        if self._rake_min_pot is not None and pot_amount < self._rake_min_pot:
+            return 0
+        rake = int(pot_amount * self._rake_percent)
+        if self._rake_cap is not None:
+            rake = min(rake, self._rake_cap)
+        return rake
+
+    def _apply_rake(self, pots: tuple[Pot, ...]) -> tuple[tuple[Pot, ...], int]:
+        """合計ポットに対してレーキを計算し、メインポット(先頭)から差し引く"""
+        if not pots:
+            return pots, 0
+        total = sum(p.amount.amount for p in pots)
+        rake = self._calculate_rake(total)
+        if rake <= 0:
+            return pots, 0
+
+        main_pot = pots[0]
+        deduction = min(rake, main_pot.amount.amount)
+        adjusted_main = Pot(
+            amount=Chips(main_pot.amount.amount - deduction),
+            eligible_player_ids=main_pot.eligible_player_ids,
+        )
+        return (adjusted_main,) + pots[1:], deduction
+
+    def _reset_contributions(self) -> None:
+        for p in self._players:
+            p.total_contributed = Chips(0)
 
     # ── ハンド終了後のクローズ判定 ──
 
@@ -583,6 +713,10 @@ class PokerTable(PokerTableInterface):
             blind_level=self._blind_level,
             ante_level=self._ante_level,
             status=self.get_table_status(),
+            side_pots=self._compute_pots(),
+            rake_percent=self._rake_percent,
+            rake_cap=self._rake_cap,
+            rake_min_pot=self._rake_min_pot,
         )
 
     # ── WaitingFor 生成 ──

@@ -4,9 +4,18 @@ import pytest
 
 from poker_domain.table import PokerTable
 from poker_domain.value_objects.chips import Chips
-from poker_domain.value_objects.action import Call, Check
+from poker_domain.value_objects.card import Card, Suit, Rank
+from poker_domain.value_objects.action import Call, Check, Raise, Fold
 from poker_domain.game_state import GamePhase, TableStatus
 from poker_domain.exceptions import TableClosedError
+
+
+def _stacked_deck(order: list[Card]):
+    """random.shuffle を差し替えて、指定した順にカードが配られるようにする"""
+    def fake_shuffle(cards: list[Card]) -> None:
+        remaining = [c for c in cards if c not in order]
+        cards[:] = order + remaining
+    return patch("poker_domain.deck.random.shuffle", fake_shuffle)
 
 
 def test_blind_level_up():
@@ -76,8 +85,24 @@ def test_fresh_empty_table_is_not_closed():
     assert table.get_table_status() == TableStatus.RECRUITING
 
 
+# 配布順は「ディーラーの次のプレイヤー」から1枚ずつ。heads-upではdealer=big_stack(index0)なので
+# 各ラウンドの最初の1枚は short_stack (index1) に配られる。
+# big_stack: A♠A♣ (勝ち) / short_stack: 2♥2♦ (負け) / ボードはどちらにも絡まないブリック
+_HEADS_UP_DECK = [
+    Card(Suit.HEARTS, Rank.TWO),    # short_stack hole1
+    Card(Suit.SPADES, Rank.ACE),    # big_stack hole1
+    Card(Suit.DIAMONDS, Rank.TWO),  # short_stack hole2
+    Card(Suit.CLUBS, Rank.ACE),     # big_stack hole2
+    Card(Suit.HEARTS, Rank.SEVEN),  # flop
+    Card(Suit.DIAMONDS, Rank.NINE),
+    Card(Suit.CLUBS, Rank.FOUR),
+    Card(Suit.SPADES, Rank.SIX),    # turn
+    Card(Suit.HEARTS, Rank.JACK),   # river
+]
+
+
 def test_table_closes_on_heads_up_bust():
-    with patch("poker_domain.deck.random.shuffle", lambda cards: None):
+    with _stacked_deck(_HEADS_UP_DECK):
         table = PokerTable(
             table_id="t1", max_players=2, small_blind=10, big_blind=20,
         )
@@ -104,3 +129,114 @@ def test_table_closes_on_heads_up_bust():
 
         with pytest.raises(TableClosedError):
             table.start_game()
+
+
+# 3人サイドポットシナリオ:
+#   A: A♠A♣ (最強、15チップしか持たずオールイン)
+#   B: K♠K♣ (2番手)
+#   C: 4♠4♣ (最弱)
+#   ボードはいずれのハンドにも絡まないブリック
+_SIDE_POT_DECK = [
+    Card(Suit.SPADES, Rank.KING),    # B hole1
+    Card(Suit.SPADES, Rank.FOUR),    # C hole1
+    Card(Suit.SPADES, Rank.ACE),     # A hole1
+    Card(Suit.CLUBS, Rank.KING),     # B hole2
+    Card(Suit.CLUBS, Rank.FOUR),     # C hole2
+    Card(Suit.CLUBS, Rank.ACE),      # A hole2
+    Card(Suit.DIAMONDS, Rank.TWO),   # flop
+    Card(Suit.HEARTS, Rank.FIVE),
+    Card(Suit.DIAMONDS, Rank.SEVEN),
+    Card(Suit.SPADES, Rank.NINE),    # turn
+    Card(Suit.HEARTS, Rank.JACK),    # river
+]
+
+
+def test_side_pot_distribution_for_uneven_all_in():
+    with _stacked_deck(_SIDE_POT_DECK):
+        table = PokerTable(
+            table_id="t1", max_players=3, small_blind=10, big_blind=20,
+        )
+        table.add_player("a", Chips(15))     # ショートスタック
+        table.add_player("b", Chips(1000))
+        table.add_player("c", Chips(1000))
+
+        result = table.start_game()
+        # 3人卓: dealer=A, SB=B(10), BB=C(20), 開始プレイヤー=A
+        assert result.state.pot.amount == 30
+        assert result.state.current_player_id == "a"
+
+        # A: 15チップしかないので Call はオールインとして成立する
+        result = table.action("a", Call())
+        assert result.state.players[0].is_all_in is True
+        assert result.state.pot.amount == 45
+
+        # B: 100 にレイズ (A のオールイン額を超える → サイドポット発生)
+        result = table.action("b", Raise(amount=100))
+        # C: コール
+        result = table.action("c", Call())
+        assert result.state.phase == GamePhase.FLOP
+        assert result.state.pot.amount == 215  # 15 + 100 + 100
+
+        # FLOP -> TURN -> RIVER の3ストリート分チェックし合う
+        for _ in range(3):
+            for pid in ("b", "c"):
+                result = table.action(pid, Check())
+
+        assert result.state.phase == GamePhase.SHOWDOWN
+
+        showdown_event = next(
+            e for e in result.events if e.event_type.name == "SHOWDOWN"
+        )
+        payouts = showdown_event.payload["payouts"]
+
+        # メインポット(45, A/B/C対象) は最強ハンドの A が獲得
+        # サイドポット(170, B/C のみ対象) は B が獲得 (A は対象外)
+        assert payouts == {"a": 45, "b": 170}
+
+        final_state = table.get_state()
+        chips_by_id = {p.player_id: p.chips.amount for p in final_state.players}
+        assert chips_by_id["a"] == 45       # 0 (all-in) + 45
+        assert chips_by_id["b"] == 1000 - 100 + 170
+        assert chips_by_id["c"] == 1000 - 100
+
+
+def test_rake_is_deducted_at_showdown():
+    with _stacked_deck(_HEADS_UP_DECK):
+        table = PokerTable(
+            table_id="t1", max_players=2, small_blind=10, big_blind=20,
+            rake_percent=0.1, rake_cap=5,
+        )
+        table.add_player("big_stack", Chips(1000))
+        table.add_player("short_stack", Chips(20))
+
+        table.start_game()
+        table.action("big_stack", Call())
+        table.action("big_stack", Check())
+        table.action("big_stack", Check())
+        result = table.action("big_stack", Check())
+
+        showdown_event = next(
+            e for e in result.events if e.event_type.name == "SHOWDOWN"
+        )
+        # ポットは40、レーキ10%=4だがキャップ5未満なのでそのまま4
+        assert showdown_event.payload["rake"] == 4
+        assert showdown_event.payload["payouts"]["big_stack"] == 36
+
+
+def test_no_rake_on_uncontested_fold_win():
+    table = PokerTable(
+        table_id="t1", max_players=2, small_blind=10, big_blind=20,
+        rake_percent=0.5,
+    )
+    table.add_player("a", Chips(1000))
+    table.add_player("b", Chips(1000))
+
+    table.start_game()
+    result = table.action("a", Fold())
+
+    showdown_event = next(
+        e for e in result.events if e.event_type.name == "SHOWDOWN"
+    )
+    assert showdown_event.payload["rake"] == 0
+    # 不戦勝はポット全額 (SB10+BB20=30) がそのまま渡る
+    assert showdown_event.payload["payouts"]["b"] == 30

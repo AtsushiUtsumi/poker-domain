@@ -15,6 +15,7 @@ from poker_domain.game_state import (
     WaitingFor,
     PlayerState,
     TableStatus,
+    Pot,
 )
 from poker_domain.player import Player
 from poker_domain.exceptions import (
@@ -46,6 +47,7 @@ __all__ = [
     "WaitingFor",
     "PlayerState",
     "TableStatus",
+    "Pot",
     # エンティティ
     "Player",
     # 例外

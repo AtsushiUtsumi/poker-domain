@@ -14,6 +14,7 @@ class Player:
     current_bet: Chips = field(default_factory=lambda: Chips(0))
     folded: bool = False
     is_all_in: bool = False
+    total_contributed: Chips = field(default_factory=lambda: Chips(0))
 
     def reset_for_new_hand(self) -> None:
         """次のハンド開始時のリセット"""
@@ -21,6 +22,7 @@ class Player:
         self.current_bet = Chips(0)
         self.folded = False
         self.is_all_in = False
+        self.total_contributed = Chips(0)
 
     @property
     def is_active(self) -> bool:

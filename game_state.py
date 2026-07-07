@@ -46,6 +46,13 @@ class GameEvent:
 
 
 @dataclass(frozen=True)
+class Pot:
+    """メインポット/サイドポットの1枠。参加権があるプレイヤーだけが対象になる"""
+    amount: Chips
+    eligible_player_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class WaitingFor:
     """poker_domain が次に誰のアクションを待っているか"""
     player_id: str
@@ -81,6 +88,10 @@ class GameState:
     blind_level: int
     ante_level: int
     status: TableStatus
+    side_pots: tuple[Pot, ...]
+    rake_percent: float
+    rake_cap: int | None
+    rake_min_pot: int | None
 
 
 @dataclass(frozen=True)

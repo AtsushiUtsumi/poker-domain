@@ -70,12 +70,16 @@ PokerTable(
     timeout_seconds: int = 30,
     blind_schedule: list[tuple[int, int]] | None = None,
     ante_schedule: list[int] | None = None,
+    rake_percent: float = 0.0,
+    rake_cap: int | None = None,
+    rake_min_pot: int | None = None,
 )
 ```
 
 - `blind_schedule` を渡すと `[(small_blind, big_blind), ...]` のレベル表として管理される
   (未指定時は `small_blind`/`big_blind` 引数を単一レベルとして使用)
 - `ante_schedule` を渡すと `[ante, ...]` のレベル表として管理される (未指定時はアンティなし = レベル0固定)
+- `rake_percent` / `rake_cap` / `rake_min_pot` でレーキ(テラ銭)を設定できる。詳細は後述の「レーキ」節を参照
 
 | メソッド | 説明 |
 |---|---|
@@ -141,12 +145,41 @@ PokerTable(
 チップが尽きると自動的に `is_all_in` になります。`Bet`/`Raise` が入ると、
 他のアクティブプレイヤー全員が再度アクション対象 (`players_to_act`) に戻ります。
 
+`Call()` は保有チップがコールに必要な額に満たない場合でも拒否されず、
+**保有チップ全額でのオールインコール**として成立します(サイドポットの主な発生源)。
+一方 `Bet`/`Raise` は必要額に満たない場合エラーになり、不足額でのオールインベット/レイズには対応していません
+(ショートスタックが取れる不足額アクションは Call のみ)。
+
 ラウンドが終了すると:
-- 全員フォールドで1人残った場合 → その場で勝者にポットが渡り `SHOWDOWN` へ
+- 全員フォールドで1人残った場合 → その場で勝者に**そのハンドのポット全額**が渡り `SHOWDOWN` へ
+  (サイドポットの構造に関わらず全額。誰も対抗できない以上、按分の必要がないため。レーキも取らない)
 - 全員 all-in の場合 → 残りのコミュニティカードを一気に配ってショーダウン
-- `RIVER` のラウンド終了 → ショーダウンして役を比較し、最強のプレイヤーがポットを獲得
-  (**同点によるスプリットポットは未対応**)
+- `RIVER` のラウンド終了 → ショーダウンしてポット(メイン/サイド)ごとに役を比較し分配
 - それ以外 → 次のフェーズに進み、コミュニティカードを配布 (FLOP:3枚、TURN/RIVER:各1枚)
+
+### サイドポット
+
+各プレイヤーの「そのハンドを通じた累計拠出額」(`Player.total_contributed`、アンティ・ブラインド・各ストリートの
+コール/ベット/レイズをすべて合算したもの)をもとに、拠出額の階層ごとにポットを分割します。
+
+- 拠出額を昇順に並べた各段階で「その段階以上を拠出した全員」からその差分だけ集めたものが1つのポットになる
+- 各ポットの獲得資格 (`eligible_player_ids`) は「その段階まで拠出していて、かつフォールドしていない」プレイヤーに限られる
+  (フォールド済みのプレイヤーの拠出分もポットには残るが、本人は対象外になる)
+- ショーダウンでは、ポットごとに対象者内で最も強い役を判定して分配する。複数人が同点の場合は等分し、
+  割り切れない端数チップは**ディーラーの次の座席から時計回りの順に**1枚ずつ配る
+- `GameState.side_pots` (`tuple[Pot, ...]`) でハンド進行中も含めて常時参照できる。
+  `Pot` は `amount: Chips` と `eligible_player_ids: tuple[str, ...]` を持つ
+- `ActionResult.events` の `SHOWDOWN` イベントの `payload` にも `pots` (分配後のポット内訳)、
+  `payouts` (プレイヤーIDごとの獲得額)、`winner_id` (最大獲得額のプレイヤー、後方互換用)、`rake` が含まれる
+
+### レーキ
+
+- `rake_percent`: ポット合計に対するレーキ率 (例: `0.05` = 5%)
+- `rake_cap`: レーキの上限額 (未指定なら上限なし)
+- `rake_min_pot`: この額に満たないポットからはレーキを取らない (未指定なら閾値なし)
+- レーキは**実際にショーダウンで役を比較して決着した場合にのみ**控除され、メインポットから差し引かれる
+  (`_apply_rake` はサイドポットには手を付けない)
+- **全員フォールドによる不戦勝(ウォークオーバー)にはレーキを取らない**
 
 ### 役の判定 (`HandEvaluator`)
 
@@ -166,14 +199,17 @@ PokerTable(
 ## 状態・イベント型 (`game_state.py`)
 
 - **`GameState`**: テーブル全体の不変スナップショット (フェーズ、ポット、コミュニティカード、各プレイヤー状態、現在の手番、
-  `small_blind`/`big_blind`/`ante`、`blind_level`/`ante_level`、`status` (`TableStatus`) など)
+  `small_blind`/`big_blind`/`ante`、`blind_level`/`ante_level`、`status` (`TableStatus`)、
+  `side_pots` (`tuple[Pot, ...]`)、`rake_percent`/`rake_cap`/`rake_min_pot` など)
 - **`PlayerState`**: プレイヤー1人分のスナップショット。`hole_cards` は showdown時、または
   `get_state()` の `viewer_player_id` と一致する場合のみ公開される
+- **`Pot`**: サイドポットの1枠。`amount: Chips` と `eligible_player_ids: tuple[str, ...]` を持つ
 - **`ActionResult`**: `action()` / `start_game()` の戻り値。`state` (最新スナップショット)、
   `events` (発生したイベント列)、`waiting_for` (次に誰の・どのアクションを待っているか。ゲーム終了時は `None`)
 - **`GameEvent`** / **`EventType`**: `PLAYER_JOINED` / `PLAYER_LEFT` / `GAME_STARTED` / `HAND_DEALT` /
   `PLAYER_ACTED` / `ROUND_ENDED` / `COMMUNITY_DEALT` / `TURN_CHANGED` / `SHOWDOWN` /
   `BLIND_LEVEL_UP` / `ANTE_LEVEL_UP` / `TABLE_CLOSED`
+  (`SHOWDOWN` の `payload` には `hands`/`pots`/`payouts`/`winner_id`/`rake` を含む)
 - **`WaitingFor`**: 次の手番プレイヤーID、取り得るアクション型のタプル、タイムアウト秒数
 - **`TableStatus`**: `RECRUITING` / `PLAYING` / `CLOSED` / `OTHER` (テーブルのライフサイクル状態。詳細は上記参照)
 
@@ -221,5 +257,6 @@ print(table.get_table_status())       # TableStatus.RECRUITING (SHOWDOWN/WAITING
 pytest
 ```
 
-- `tests/unit/`: `Deck` / `Chips` / `Card` / `HandEvaluator` / ゲーム進行 / テーブルのライフサイクル(レベル管理・クローズ)の単体テスト
+- `tests/unit/`: `Deck` / `Chips` / `Card` / `HandEvaluator` / ゲーム進行 /
+  テーブルのライフサイクル(レベル管理・クローズ・サイドポット・レーキ)の単体テスト
 - `tests/scenarios/`: `PokerTable` を通した一連のハンド進行のシナリオテスト
