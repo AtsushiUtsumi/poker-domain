@@ -240,3 +240,64 @@ def test_no_rake_on_uncontested_fold_win():
     assert showdown_event.payload["rake"] == 0
     # 不戦勝はポット全額 (SB10+BB20=30) がそのまま渡る
     assert showdown_event.payload["payouts"]["b"] == 30
+
+
+# 3人卓でバストが発生した後にディーラーローテーションが正しく次ハンドに進めるかのシナリオ:
+#   ハンド1: dealer=a, SB=b, BB=c。a, b が降りて c の不戦勝 (誰もバストしない)
+#   ハンド2: dealer=b, SB=c, BB=a。c がオールインし最弱ハンド (4-4) で敗北してバスト
+#   ハンド3: バストした c を除外し、a, b の2人でハンドが正しく開始できることを確認する
+_BUST_ROTATION_DECK = [
+    Card(Suit.SPADES, Rank.FOUR),    # c hole1
+    Card(Suit.SPADES, Rank.ACE),     # a hole1
+    Card(Suit.SPADES, Rank.KING),    # b hole1
+    Card(Suit.CLUBS, Rank.FOUR),     # c hole2
+    Card(Suit.CLUBS, Rank.ACE),      # a hole2
+    Card(Suit.CLUBS, Rank.KING),     # b hole2
+    Card(Suit.DIAMONDS, Rank.TWO),   # flop
+    Card(Suit.HEARTS, Rank.FIVE),
+    Card(Suit.DIAMONDS, Rank.SEVEN),
+    Card(Suit.SPADES, Rank.NINE),    # turn
+    Card(Suit.HEARTS, Rank.JACK),    # river
+]
+
+
+def test_three_handed_game_progresses_after_a_player_busts():
+    with _stacked_deck(_BUST_ROTATION_DECK):
+        table = PokerTable(
+            table_id="t1", max_players=3, small_blind=10, big_blind=20,
+        )
+        table.add_player("a", Chips(1000))
+        table.add_player("b", Chips(1000))
+        table.add_player("c", Chips(100))
+
+        # ── ハンド1: dealer=a, SB=b, BB=c。a, b が降りて c の不戦勝 ──
+        table.start_game()
+        table.action("a", Fold())
+        result = table.action("b", Fold())
+        assert result.state.phase == GamePhase.SHOWDOWN
+
+        # ── ハンド2: dealer=b, SB=c, BB=a。c がオールインして敗北しバストする ──
+        result = table.start_game()
+        assert result.state.current_player_id == "b"
+
+        table.action("b", Call())
+        table.action("c", Raise(amount=110))  # c の残りチップ全額でオールイン
+        table.action("a", Call())
+        result = table.action("b", Call())
+        assert result.state.phase == GamePhase.FLOP
+
+        for _ in range(3):
+            for pid in ("a", "b"):
+                result = table.action(pid, Check())
+
+        assert result.state.phase == GamePhase.SHOWDOWN
+        chips_by_id = {p.player_id: p.chips.amount for p in table.get_state().players}
+        assert chips_by_id["c"] == 0  # A-A の a が勝ち、4-4 の c はバスト
+
+        # ── ハンド3: バストした c を除いて a, b だけで正常に開始できること ──
+        result = table.start_game()
+        assert result.state.phase == GamePhase.PRE_FLOP
+        remaining_ids = {p.player_id for p in result.state.players}
+        assert remaining_ids == {"a", "b"}
+        assert result.state.current_player_id == "a"
+        assert result.state.pot.amount == 30  # SB(10) + BB(20)

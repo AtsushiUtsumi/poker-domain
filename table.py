@@ -130,9 +130,16 @@ class PokerTable(PokerTableInterface):
 
         # ── 前ハンド終了後の後片付け ──
         if self._phase == GamePhase.SHOWDOWN:
-            self._dealer_index = (self._dealer_index + 1) % len(self._players)
+            n = len(self._players)
+            # 現ディーラーの次の座席から順に、チップが残っている最初のプレイヤーを次のディーラーにする
+            seating_order = [self._players[(self._dealer_index + 1 + i) % n] for i in range(n)]
+            next_dealer = next((p for p in seating_order if p.chips.amount > 0), None)
+
             # チップが0のプレイヤーは除外
             self._players = [p for p in self._players if p.chips.amount > 0]
+
+            if next_dealer is not None:
+                self._dealer_index = self._players.index(next_dealer)
 
         if len(self._players) < 2:
             raise NotEnoughPlayersError("2人以上必要です")
