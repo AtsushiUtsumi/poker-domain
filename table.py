@@ -10,6 +10,7 @@ from poker_domain.game_state import (
     ActionResult,
     WaitingFor,
     PlayerState,
+    TableStatus,
 )
 from poker_domain.player import Player
 from poker_domain.deck import Deck
@@ -21,6 +22,7 @@ from poker_domain.exceptions import (
     TableFullError,
     NotEnoughPlayersError,
     GameAlreadyStartedError,
+    TableClosedError,
 )
 
 
@@ -37,12 +39,23 @@ class PokerTable(PokerTableInterface):
         small_blind: int = 25,
         big_blind: int = 50,
         timeout_seconds: int = 30,
+        blind_schedule: list[tuple[int, int]] | None = None,
+        ante_schedule: list[int] | None = None,
     ) -> None:
         self._table_id = table_id
         self._max_players = max_players
-        self._small_blind = Chips(small_blind)
-        self._big_blind = Chips(big_blind)
         self._timeout_seconds = timeout_seconds
+
+        # ブラインドレベル: [(small_blind, big_blind), ...]。未指定時は固定額の単一レベル
+        self._blind_schedule: list[tuple[int, int]] = blind_schedule or [(small_blind, big_blind)]
+        self._blind_level: int = 0
+        self._small_blind = Chips(self._blind_schedule[0][0])
+        self._big_blind = Chips(self._blind_schedule[0][1])
+
+        # アンティレベル: [ante, ...]。未指定時はアンティなし
+        self._ante_schedule: list[int] = ante_schedule or [0]
+        self._ante_level: int = 0
+        self._ante = Chips(self._ante_schedule[0])
 
         self._players: list[Player] = []
         self._phase: GamePhase = GamePhase.WAITING
@@ -56,9 +69,15 @@ class PokerTable(PokerTableInterface):
         # 現在のラウンドでまだアクション未済のプレイヤーインデックス
         self._players_to_act: set[int] = set()
 
+        # テーブルのライフサイクル管理
+        self._closed: bool = False
+        self._has_had_players: bool = False
+
     # ─── プレイヤー管理 ───
 
     def add_player(self, player_id: str, chips: Chips) -> GameEvent:
+        if self._closed:
+            raise TableClosedError("テーブルはクローズしています")
         if len(self._players) >= self._max_players:
             raise TableFullError("テーブルが満席です")
         if self._phase not in (GamePhase.WAITING, GamePhase.SHOWDOWN):
@@ -67,6 +86,7 @@ class PokerTable(PokerTableInterface):
             raise InvalidPlayerError(f"{player_id} は既に参加しています")
 
         self._players.append(Player(player_id=player_id, chips=chips))
+        self._has_had_players = True
         return GameEvent(
             event_type=EventType.PLAYER_JOINED,
             payload={"player_id": player_id},
@@ -76,6 +96,9 @@ class PokerTable(PokerTableInterface):
         if self._phase not in (GamePhase.WAITING, GamePhase.SHOWDOWN):
             raise GameAlreadyStartedError("ゲーム進行中には離開できません")
         self._players = [p for p in self._players if p.player_id != player_id]
+        # 一度でもプレイヤーがいた卓が誰もいなくなった場合はクローズ
+        if self._has_had_players and len(self._players) == 0:
+            self._closed = True
         return GameEvent(
             event_type=EventType.PLAYER_LEFT,
             payload={"player_id": player_id},
@@ -89,6 +112,8 @@ class PokerTable(PokerTableInterface):
         WAITING: 初回開始
         SHOWDOWN: 前のハンド終了後 → ディーラーを回してから次のハンド開始
         """
+        if self._closed:
+            raise TableClosedError("テーブルはクローズしています")
         if self._phase not in (GamePhase.WAITING, GamePhase.SHOWDOWN):
             raise GameAlreadyStartedError("ゲームは進行中です")
 
@@ -112,6 +137,9 @@ class PokerTable(PokerTableInterface):
         self._pot = Chips(0)
         self._current_bet = Chips(0)
         self._community_cards = ()
+
+        # ── アンティ徴収 ──
+        self._collect_antes(events)
 
         # ── ブラインド徴収 ──
         self._collect_blinds(events)
@@ -201,6 +229,15 @@ class PokerTable(PokerTableInterface):
 
     def get_state(self, viewer_player_id: str | None = None) -> GameState:
         return self._snapshot(viewer_player_id)
+
+    def get_table_status(self) -> TableStatus:
+        if self._closed:
+            return TableStatus.CLOSED
+        if self._phase in (GamePhase.WAITING, GamePhase.SHOWDOWN):
+            return TableStatus.RECRUITING
+        if self._phase in (GamePhase.PRE_FLOP, GamePhase.FLOP, GamePhase.TURN, GamePhase.RIVER):
+            return TableStatus.PLAYING
+        return TableStatus.OTHER
 
     # ═══════════════════════════════════════════════
     # 以下は内部メソッド
@@ -305,6 +342,44 @@ class PokerTable(PokerTableInterface):
         if player.chips.amount == 0:
             player.is_all_in = True
 
+    # ── アンティ徴収 ──
+
+    def _collect_antes(self, events: list[GameEvent]) -> None:
+        if self._ante.amount <= 0:
+            return
+        for player in self._players:
+            amount = min(self._ante.amount, player.chips.amount)
+            player.chips = Chips(player.chips.amount - amount)
+            self._pot = self._pot + Chips(amount)
+            if player.chips.amount == 0:
+                player.is_all_in = True
+
+    # ── ブラインド/アンティ レベル ──
+
+    def level_up_blind(self) -> GameEvent:
+        if self._blind_level < len(self._blind_schedule) - 1:
+            self._blind_level += 1
+            sb, bb = self._blind_schedule[self._blind_level]
+            self._small_blind = Chips(sb)
+            self._big_blind = Chips(bb)
+        return GameEvent(
+            event_type=EventType.BLIND_LEVEL_UP,
+            payload={
+                "level": self._blind_level,
+                "small_blind": self._small_blind.amount,
+                "big_blind": self._big_blind.amount,
+            },
+        )
+
+    def level_up_ante(self) -> GameEvent:
+        if self._ante_level < len(self._ante_schedule) - 1:
+            self._ante_level += 1
+            self._ante = Chips(self._ante_schedule[self._ante_level])
+        return GameEvent(
+            event_type=EventType.ANTE_LEVEL_UP,
+            payload={"level": self._ante_level, "ante": self._ante.amount},
+        )
+
     # ── ホールカード配布 ──
 
     def _deal_hole_cards(self) -> None:
@@ -404,6 +479,7 @@ class PokerTable(PokerTableInterface):
             event_type=EventType.SHOWDOWN,
             payload={"winner_id": winner.player_id, "hands": {}},
         ))
+        self._close_if_finished(events)
         return ActionResult(
             state=self._snapshot(),
             events=tuple(events),
@@ -435,11 +511,21 @@ class PokerTable(PokerTableInterface):
             event_type=EventType.SHOWDOWN,
             payload={"winner_id": best_player.player_id, "hands": hands_log},  # type: ignore
         ))
+        self._close_if_finished(events)
         return ActionResult(
             state=self._snapshot(),
             events=tuple(events),
             waiting_for=None,
         )
+
+    # ── ハンド終了後のクローズ判定 ──
+
+    def _close_if_finished(self, events: list[GameEvent]) -> None:
+        """生存 (チップ>0) プレイヤーが1人以下になったら卓をクローズする"""
+        survivors = [p for p in self._players if p.chips.amount > 0]
+        if len(survivors) <= 1 and not self._closed:
+            self._closed = True
+            events.append(GameEvent(event_type=EventType.TABLE_CLOSED, payload={}))
 
     # ── ヘルパー ──
 
@@ -493,6 +579,10 @@ class PokerTable(PokerTableInterface):
             dealer_id=dealer_id,
             small_blind=self._small_blind,
             big_blind=self._big_blind,
+            ante=self._ante,
+            blind_level=self._blind_level,
+            ante_level=self._ante_level,
+            status=self.get_table_status(),
         )
 
     # ── WaitingFor 生成 ──

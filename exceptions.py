@@ -36,3 +36,8 @@ class GameAlreadyStartedError(PokerError):
 class DeckEmptyError(PokerError):
     """デッキのカード不足"""
     pass
+
+
+class TableClosedError(PokerError):
+    """クローズしたテーブルに対する操作"""
+    pass

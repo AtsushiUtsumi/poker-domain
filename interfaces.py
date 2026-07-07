@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 
 from poker_domain.value_objects.action import Action
 from poker_domain.value_objects.chips import Chips
-from poker_domain.game_state import ActionResult, GameState, GameEvent
+from poker_domain.game_state import ActionResult, GameState, GameEvent, TableStatus
 
 
 class PokerTableInterface(ABC):
@@ -34,4 +34,19 @@ class PokerTableInterface(ABC):
     @abstractmethod
     def get_state(self, viewer_player_id: str | None = None) -> GameState:
         """現在のゲーム状態のスナップショットを返す"""
+        ...
+
+    @abstractmethod
+    def level_up_blind(self) -> GameEvent:
+        """ブラインドレベルを1段階上昇させる (最終レベルの場合は据え置き)"""
+        ...
+
+    @abstractmethod
+    def level_up_ante(self) -> GameEvent:
+        """アンティレベルを1段階上昇させる (最終レベルの場合は据え置き)"""
+        ...
+
+    @abstractmethod
+    def get_table_status(self) -> TableStatus:
+        """テーブルのライフサイクル状態 (参加募集中/プレイ中/クローズ/その他) を返す"""
         ...

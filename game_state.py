@@ -16,6 +16,14 @@ class GamePhase(Enum):
     SHOWDOWN = "showdown"
 
 
+class TableStatus(Enum):
+    """PokerTable 全体のライフサイクル状態 (GamePhase とは別軸)"""
+    RECRUITING = "recruiting"  # 参加募集中 (新規ハンドの開始前 = プレイヤー参加/離脱が可能)
+    PLAYING = "playing"        # プレイ中 (ハンド進行中)
+    CLOSED = "closed"          # クローズ (卓が空になった、または対戦不能な人数まで減った)
+    OTHER = "other"            # 上記いずれにも該当しない状態
+
+
 class EventType(Enum):
     PLAYER_JOINED = "player_joined"
     PLAYER_LEFT = "player_left"
@@ -26,6 +34,9 @@ class EventType(Enum):
     COMMUNITY_DEALT = "community_dealt"
     TURN_CHANGED = "turn_changed"
     SHOWDOWN = "showdown"
+    BLIND_LEVEL_UP = "blind_level_up"
+    ANTE_LEVEL_UP = "ante_level_up"
+    TABLE_CLOSED = "table_closed"
 
 
 @dataclass(frozen=True)
@@ -66,6 +77,10 @@ class GameState:
     dealer_id: str
     small_blind: Chips
     big_blind: Chips
+    ante: Chips
+    blind_level: int
+    ante_level: int
+    status: TableStatus
 
 
 @dataclass(frozen=True)

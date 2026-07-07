@@ -14,6 +14,7 @@ from poker_domain.game_state import (
     ActionResult,
     WaitingFor,
     PlayerState,
+    TableStatus,
 )
 from poker_domain.player import Player
 from poker_domain.exceptions import (
@@ -25,6 +26,7 @@ from poker_domain.exceptions import (
     NotEnoughPlayersError,
     GameAlreadyStartedError,
     DeckEmptyError,
+    TableClosedError,
 )
 
 __all__ = [
@@ -43,6 +45,7 @@ __all__ = [
     "ActionResult",
     "WaitingFor",
     "PlayerState",
+    "TableStatus",
     # エンティティ
     "Player",
     # 例外
@@ -54,4 +57,5 @@ __all__ = [
     "NotEnoughPlayersError",
     "GameAlreadyStartedError",
     "DeckEmptyError",
+    "TableClosedError",
 ]
