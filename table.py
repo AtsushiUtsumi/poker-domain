@@ -104,10 +104,28 @@ class PokerTable(PokerTableInterface):
     def remove_player(self, player_id: str) -> GameEvent:
         if self._phase not in (GamePhase.WAITING, GamePhase.SHOWDOWN):
             raise GameAlreadyStartedError("ゲーム進行中には離開できません")
+
+        # 除外前に現在のカレントプレイヤー/ディーラーをオブジェクトとして覚えておき、
+        # 縮小後のリストに対してインデックスを引き直す (該当者自身が離脱した場合は 0 にフォールバック)
+        current_player = self._players[self._current_player_index] if self._players else None
+        dealer_player = self._players[self._dealer_index] if self._players else None
+
         self._players = [p for p in self._players if p.player_id != player_id]
         # 一度でもプレイヤーがいた卓が誰もいなくなった場合はクローズ
         if self._has_had_players and len(self._players) == 0:
             self._closed = True
+
+        if self._players:
+            self._current_player_index = (
+                self._players.index(current_player) if current_player in self._players else 0
+            )
+            self._dealer_index = (
+                self._players.index(dealer_player) if dealer_player in self._players else 0
+            )
+        else:
+            self._current_player_index = 0
+            self._dealer_index = 0
+
         return GameEvent(
             event_type=EventType.PLAYER_LEFT,
             payload={"player_id": player_id},

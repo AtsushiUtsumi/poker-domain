@@ -301,3 +301,60 @@ def test_three_handed_game_progresses_after_a_player_busts():
         assert remaining_ids == {"a", "b"}
         assert result.state.current_player_id == "a"
         assert result.state.pot.amount == 30  # SB(10) + BB(20)
+
+
+def test_get_state_survives_remove_player_after_showdown_when_indices_become_stale():
+    """2人卓でハンドを1回消化 (SHOWDOWN) した後、_current_player_index と _dealer_index が
+    異なるプレイヤーを指している状態で、そのどちらでもないプレイヤー (dealer 側) が
+    remove_player() で離脱しても get_state() がクラッシュしないこと。
+
+    heads-up では pre-flop はディーラー(index0) から、post-flop は非ディーラー(index1) から
+    行動するため、flop で b (index1) が fold すると current_player_index=1 (b), dealer_index=0
+    (a) のまま SHOWDOWN になる。この状態で a (index0) を remove すると、生存者 b は新しい
+    リストの index0 にずれるが、古い _current_player_index=1 は縮んだリストに対して範囲外になる。
+    """
+    table = PokerTable(table_id="t1", max_players=2, small_blind=10, big_blind=20)
+    table.add_player("a", Chips(1000))
+    table.add_player("b", Chips(1000))
+
+    table.start_game()
+    table.action("a", Call())
+    result = table.action("b", Check())
+    assert result.state.phase == GamePhase.FLOP
+
+    result = table.action("b", Fold())
+    assert result.state.phase == GamePhase.SHOWDOWN
+    assert result.state.current_player_id == "b"
+    assert result.state.dealer_id == "a"
+
+    table.remove_player("a")
+
+    state = table.get_state()  # 内部 _snapshot() が古いインデックスで例外を投げないこと
+    assert [p.player_id for p in state.players] == ["b"]
+    assert state.current_player_id == "b"
+    assert state.dealer_id == "b"
+
+
+def test_remove_player_not_referenced_by_indices_does_not_break_state():
+    """3人卓で、_current_player_index/_dealer_index のどちらも指していないプレイヤーが
+    離脱するケース (インデックスの再計算が本来不要なはず) でも状態が壊れないこと。
+    """
+    table = PokerTable(table_id="t1", max_players=3, small_blind=10, big_blind=20)
+    table.add_player("a", Chips(1000))
+    table.add_player("b", Chips(1000))
+    table.add_player("c", Chips(1000))
+
+    table.start_game()
+    table.action("a", Fold())
+    result = table.action("b", Fold())
+    assert result.state.phase == GamePhase.SHOWDOWN
+    # 不戦勝の c が current_player_id にも dealer_id にもならないことを前提とする
+    assert result.state.current_player_id == "b"
+    assert result.state.dealer_id == "a"
+
+    table.remove_player("c")
+
+    state = table.get_state()
+    assert {p.player_id for p in state.players} == {"a", "b"}
+    assert state.current_player_id == "b"
+    assert state.dealer_id == "a"
