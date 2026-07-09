@@ -29,6 +29,7 @@ from poker_domain.exceptions import (
     DeckEmptyError,
     TableClosedError,
     RebuyNotAllowedError,
+    InvalidBuyInError,
 )
 
 __all__ = [
@@ -62,4 +63,5 @@ __all__ = [
     "DeckEmptyError",
     "TableClosedError",
     "RebuyNotAllowedError",
+    "InvalidBuyInError",
 ]

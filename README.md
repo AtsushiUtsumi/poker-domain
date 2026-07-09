@@ -74,6 +74,7 @@ PokerTable(
     rake_cap: int | None = None,
     rake_min_pot: int | None = None,
     allow_rebuy: bool = True,
+    fixed_buy_in: int | None = None,
 )
 ```
 
@@ -83,10 +84,12 @@ PokerTable(
 - `rake_percent` / `rake_cap` / `rake_min_pot` でレーキ(テラ銭)を設定できる。詳細は後述の「レーキ」節を参照
 - `allow_rebuy=False` にすると、一度チップ0でバストして除外されたプレイヤーIDは同じテーブルに
   `add_player()` で再参加できなくなり、`RebuyNotAllowedError` になる (バスト前の離脱・再入場は対象外)
+- `fixed_buy_in` を設定すると、`add_player()` の `chips` がこの額と完全に一致する場合のみ参加でき、
+  一致しない場合は `InvalidBuyInError` になる (未設定時はバイイン額は自由)
 
 | メソッド | 説明 |
 |---|---|
-| `add_player(player_id, chips)` | プレイヤーを着席させる。満席・進行中・重複参加・クローズ後・リバイ禁止時のバスト済みIDはエラー |
+| `add_player(player_id, chips)` | プレイヤーを着席させる。満席・進行中・重複参加・クローズ後・リバイ禁止時のバスト済みID・固定バイイン額不一致はエラー |
 | `remove_player(player_id)` | プレイヤーを離席させる。進行中は不可。全員離脱すると卓は自動的にクローズする |
 | `start_game()` | ハンドを開始する。アンティ・ブラインド徴収 → ホールカード2枚配布 → PRE_FLOP開始。2人以上必要、クローズ後はエラー |
 | `action(player_id, action)` | 現在の手番プレイヤーのアクションを適用し、次の状態を返す |
@@ -142,6 +145,13 @@ PokerTable(
 - バストする前に自発的に `remove_player()` で離脱したプレイヤーの再入場は制限されない
   (制限対象はあくまで「チップを失って強制退席したプレイヤー」)
 - 既定値は `allow_rebuy=True` で、従来通り誰でも何度でも再参加できる
+
+### バイイン額の固定
+
+- `PokerTable(..., fixed_buy_in=1000)` のように作成すると、`add_player()` の `chips` が
+  この額とピッタリ一致する場合のみ参加を受け付け、それ以外は `InvalidBuyInError` になる
+  (リバイ時の再バイインにも同じ制約が適用される)
+- 既定値は `fixed_buy_in=None` で、従来通り任意の額でバイインできる
 
 ### アクション (`value_objects/action.py`)
 
@@ -236,6 +246,7 @@ PokerTable(
 - `DeckEmptyError`
 - `TableClosedError`
 - `RebuyNotAllowedError`
+- `InvalidBuyInError`
 
 ## 使用例
 

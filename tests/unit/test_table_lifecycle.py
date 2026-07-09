@@ -7,7 +7,7 @@ from poker_domain.value_objects.chips import Chips
 from poker_domain.value_objects.card import Card, Suit, Rank
 from poker_domain.value_objects.action import Call, Check, Raise, Fold
 from poker_domain.game_state import GamePhase, TableStatus
-from poker_domain.exceptions import TableClosedError, RebuyNotAllowedError
+from poker_domain.exceptions import TableClosedError, RebuyNotAllowedError, InvalidBuyInError
 
 
 def _stacked_deck(order: list[Card]):
@@ -352,6 +352,46 @@ def test_rebuy_allowed_for_voluntary_leave_even_when_disallowed():
 
     event = table.add_player("b", Chips(1000))
     assert event.payload["player_id"] == "b"
+
+
+def test_fixed_buy_in_rejects_mismatched_amount():
+    table = PokerTable(table_id="t1", max_players=3, fixed_buy_in=1000)
+
+    with pytest.raises(InvalidBuyInError):
+        table.add_player("a", Chips(500))
+
+    event = table.add_player("a", Chips(1000))
+    assert event.payload["player_id"] == "a"
+
+
+def test_no_fixed_buy_in_allows_any_amount():
+    table = PokerTable(table_id="t1", max_players=3)
+
+    table.add_player("a", Chips(100))
+    table.add_player("b", Chips(9999))
+
+    chips_by_id = {p.player_id: p.chips.amount for p in table.get_state().players}
+    assert chips_by_id == {"a": 100, "b": 9999}
+
+
+def test_fixed_buy_in_also_applies_to_later_add_player():
+    """固定バイイン額の制約は、ハンドが一度進行した後の add_player にも継続して適用される"""
+    table = PokerTable(
+        table_id="t1", max_players=3, small_blind=10, big_blind=20,
+        fixed_buy_in=1000,
+    )
+    table.add_player("a", Chips(1000))
+    table.add_player("b", Chips(1000))
+
+    result = table.start_game()
+    result = table.action(result.state.current_player_id, Fold())  # 不戦勝で即 SHOWDOWN へ
+    assert result.state.phase == GamePhase.SHOWDOWN
+
+    with pytest.raises(InvalidBuyInError):
+        table.add_player("newcomer", Chips(500))
+
+    event = table.add_player("newcomer", Chips(1000))
+    assert event.payload["player_id"] == "newcomer"
 
 
 def test_get_state_survives_remove_player_after_showdown_when_indices_become_stale():

@@ -25,6 +25,7 @@ from poker_domain.exceptions import (
     GameAlreadyStartedError,
     TableClosedError,
     RebuyNotAllowedError,
+    InvalidBuyInError,
 )
 
 
@@ -47,6 +48,7 @@ class PokerTable(PokerTableInterface):
         rake_cap: int | None = None,
         rake_min_pot: int | None = None,
         allow_rebuy: bool = True,
+        fixed_buy_in: int | None = None,
     ) -> None:
         self._table_id = table_id
         self._max_players = max_players
@@ -55,6 +57,9 @@ class PokerTable(PokerTableInterface):
         # リバイ設定: False の場合、一度バスト(チップ0で除外)したプレイヤーは再参加できない
         self._allow_rebuy = allow_rebuy
         self._busted_player_ids: set[str] = set()
+
+        # 固定バイイン額: 設定時はこの額ピッタリのバイインのみ許可する。未指定時はバイイン額自由
+        self._fixed_buy_in = fixed_buy_in
 
         # レーキ設定 (ショーダウンで決着したポットにのみ適用。不戦勝には適用しない)
         self._rake_percent = rake_percent
@@ -101,6 +106,8 @@ class PokerTable(PokerTableInterface):
             raise InvalidPlayerError(f"{player_id} は既に参加しています")
         if not self._allow_rebuy and player_id in self._busted_player_ids:
             raise RebuyNotAllowedError(f"{player_id} はバスト済みのためリバイ禁止テーブルに再参加できません")
+        if self._fixed_buy_in is not None and chips.amount != self._fixed_buy_in:
+            raise InvalidBuyInError(f"バイインは {self._fixed_buy_in} 固定です")
 
         self._players.append(Player(player_id=player_id, chips=chips))
         self._has_had_players = True

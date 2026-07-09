@@ -46,3 +46,8 @@ class TableClosedError(PokerError):
 class RebuyNotAllowedError(PokerError):
     """リバイ禁止テーブルで、バストしたプレイヤーが再参加しようとした"""
     pass
+
+
+class InvalidBuyInError(PokerError):
+    """固定バイイン額が設定されたテーブルで、額が一致しないバイインを試みた"""
+    pass
