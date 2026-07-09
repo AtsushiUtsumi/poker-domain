@@ -343,6 +343,40 @@ def test_rebuy_disallowed_after_bust_when_allow_rebuy_is_false():
             table.add_player("c", Chips(500))
 
 
+def test_rebuy_disallowed_immediately_after_bust_before_next_start_game():
+    """SHOWDOWN直後、次の start_game() を呼ぶ前に remove_player→add_player した場合でも
+    allow_rebuy=False なら RebuyNotAllowedError になるべき"""
+    with _stacked_deck(_BUST_ROTATION_DECK):
+        table = PokerTable(
+            table_id="t1", max_players=3, small_blind=10, big_blind=20,
+            allow_rebuy=False,
+        )
+        table.add_player("a", Chips(1000))
+        table.add_player("b", Chips(1000))
+        table.add_player("c", Chips(100))
+
+        table.start_game()
+        table.action("a", Fold())
+        table.action("b", Fold())
+
+        table.start_game()
+        table.action("b", Call())
+        table.action("c", Raise(amount=110))
+        table.action("a", Call())
+        result = table.action("b", Call())
+        assert result.state.phase == GamePhase.FLOP
+
+        for _ in range(3):
+            for pid in ("a", "b"):
+                result = table.action(pid, Check())
+        assert result.state.phase == GamePhase.SHOWDOWN
+
+        # ここがポイント: 次の start_game() を呼ぶ前に、バストした c を rebuy しようとする
+        table.remove_player("c")
+        with pytest.raises(RebuyNotAllowedError):
+            table.add_player("c", Chips(100))
+
+
 def test_rebuy_allowed_for_voluntary_leave_even_when_disallowed():
     """バスト経由ではない自発的な離脱者は、allow_rebuy=False でも再入場できる"""
     table = PokerTable(table_id="t1", max_players=2, allow_rebuy=False)

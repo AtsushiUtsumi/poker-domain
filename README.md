@@ -140,8 +140,10 @@ PokerTable(
 
 ### リバイ
 
-- `PokerTable(..., allow_rebuy=False)` で作成すると、ハンド終了時にチップ0で除外(バスト)された
-  プレイヤーIDを記憶し、以後同じIDで `add_player()` を呼んでも `RebuyNotAllowedError` になる
+- `PokerTable(..., allow_rebuy=False)` で作成すると、そのハンドの決着(不戦勝の払い戻し、または
+  ショーダウンでの分配)によってチップ0が確定したプレイヤーIDをその場で即座に記憶し、
+  以後同じIDで `add_player()` を呼んでも `RebuyNotAllowedError` になる
+  (次の `start_game()` を呼ぶ前、SHOWDOWN中に `remove_player()` → `add_player()` しても判定は有効)
 - バストする前に自発的に `remove_player()` で離脱したプレイヤーの再入場は制限されない
   (制限対象はあくまで「チップを失って強制退席したプレイヤー」)
 - 既定値は `allow_rebuy=True` で、従来通り誰でも何度でも再参加できる

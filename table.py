@@ -168,8 +168,7 @@ class PokerTable(PokerTableInterface):
             seating_order = [self._players[(self._dealer_index + 1 + i) % n] for i in range(n)]
             next_dealer = next((p for p in seating_order if p.chips.amount > 0), None)
 
-            # チップが0のプレイヤーは除外 (リバイ禁止判定のためバストしたIDを記録しておく)
-            self._busted_player_ids |= {p.player_id for p in self._players if p.chips.amount == 0}
+            # チップが0のプレイヤーは除外 (バスト判定自体はハンド決着時に即時記録済み)
             self._players = [p for p in self._players if p.chips.amount > 0]
 
             if next_dealer is not None:
@@ -534,6 +533,7 @@ class PokerTable(PokerTableInterface):
         self._pot = Chips(0)
         self._reset_contributions()
         self._phase = GamePhase.SHOWDOWN
+        self._record_busted_players()
         events.append(GameEvent(
             event_type=EventType.SHOWDOWN,
             payload={
@@ -575,6 +575,7 @@ class PokerTable(PokerTableInterface):
 
         self._pot = Chips(0)
         self._reset_contributions()
+        self._record_busted_players()
 
         winner_id = max(payouts, key=payouts.get) if payouts else None
         events.append(GameEvent(
@@ -688,6 +689,10 @@ class PokerTable(PokerTableInterface):
     def _reset_contributions(self) -> None:
         for p in self._players:
             p.total_contributed = Chips(0)
+
+    def _record_busted_players(self) -> None:
+        """チップ0が確定した時点で即座にバスト済みとして記録する (リバイ禁止判定用)"""
+        self._busted_player_ids |= {p.player_id for p in self._players if p.chips.amount == 0}
 
     # ── ハンド終了後のクローズ判定 ──
 
