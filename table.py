@@ -41,9 +41,9 @@ class PokerTable(PokerTableInterface):
         max_players: int = 6,
         small_blind: int = 25,
         big_blind: int = 50,
+        ante: int = 0,
         timeout_seconds: int = 30,
-        blind_schedule: list[tuple[int, int]] | None = None,
-        ante_schedule: list[int] | None = None,
+        level_schedule: list[tuple[int, int, int]] | None = None,
         rake_percent: float = 0.0,
         rake_cap: int | None = None,
         rake_min_pot: int | None = None,
@@ -66,16 +66,12 @@ class PokerTable(PokerTableInterface):
         self._rake_cap = rake_cap
         self._rake_min_pot = rake_min_pot
 
-        # ブラインドレベル: [(small_blind, big_blind), ...]。未指定時は固定額の単一レベル
-        self._blind_schedule: list[tuple[int, int]] = blind_schedule or [(small_blind, big_blind)]
-        self._blind_level: int = 0
-        self._small_blind = Chips(self._blind_schedule[0][0])
-        self._big_blind = Chips(self._blind_schedule[0][1])
-
-        # アンティレベル: [ante, ...]。未指定時はアンティなし
-        self._ante_schedule: list[int] = ante_schedule or [0]
-        self._ante_level: int = 0
-        self._ante = Chips(self._ante_schedule[0])
+        # レベルスケジュール: [(small_blind, big_blind, ante), ...]。未指定時は固定額の単一レベル
+        self._level_schedule: list[tuple[int, int, int]] = level_schedule or [(small_blind, big_blind, ante)]
+        self._level: int = 0
+        self._small_blind = Chips(self._level_schedule[0][0])
+        self._big_blind = Chips(self._level_schedule[0][1])
+        self._ante = Chips(self._level_schedule[0][2])
 
         self._players: list[Player] = []
         self._phase: GamePhase = GamePhase.WAITING
@@ -410,30 +406,23 @@ class PokerTable(PokerTableInterface):
             if player.chips.amount == 0:
                 player.is_all_in = True
 
-    # ── ブラインド/アンティ レベル ──
+    # ── レベル ──
 
-    def level_up_blind(self) -> GameEvent:
-        if self._blind_level < len(self._blind_schedule) - 1:
-            self._blind_level += 1
-            sb, bb = self._blind_schedule[self._blind_level]
+    def level_up(self) -> GameEvent:
+        if self._level < len(self._level_schedule) - 1:
+            self._level += 1
+            sb, bb, ante = self._level_schedule[self._level]
             self._small_blind = Chips(sb)
             self._big_blind = Chips(bb)
+            self._ante = Chips(ante)
         return GameEvent(
-            event_type=EventType.BLIND_LEVEL_UP,
+            event_type=EventType.LEVEL_UP,
             payload={
-                "level": self._blind_level,
+                "level": self._level,
                 "small_blind": self._small_blind.amount,
                 "big_blind": self._big_blind.amount,
+                "ante": self._ante.amount,
             },
-        )
-
-    def level_up_ante(self) -> GameEvent:
-        if self._ante_level < len(self._ante_schedule) - 1:
-            self._ante_level += 1
-            self._ante = Chips(self._ante_schedule[self._ante_level])
-        return GameEvent(
-            event_type=EventType.ANTE_LEVEL_UP,
-            payload={"level": self._ante_level, "ante": self._ante.amount},
         )
 
     # ── ホールカード配布 ──
@@ -756,8 +745,7 @@ class PokerTable(PokerTableInterface):
             small_blind=self._small_blind,
             big_blind=self._big_blind,
             ante=self._ante,
-            blind_level=self._blind_level,
-            ante_level=self._ante_level,
+            level=self._level,
             status=self.get_table_status(),
             side_pots=self._compute_pots(),
             rake_percent=self._rake_percent,

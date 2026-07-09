@@ -52,8 +52,7 @@ class PokerTableInterface(ABC):
     def start_game(self) -> ActionResult: ...
     def action(self, player_id: str, action: Action) -> ActionResult: ...
     def get_state(self, viewer_player_id: str | None = None) -> GameState: ...
-    def level_up_blind(self) -> GameEvent: ...
-    def level_up_ante(self) -> GameEvent: ...
+    def level_up(self) -> GameEvent: ...
     def get_table_status(self) -> TableStatus: ...
 ```
 
@@ -67,9 +66,9 @@ PokerTable(
     max_players: int = 6,
     small_blind: int = 25,
     big_blind: int = 50,
+    ante: int = 0,
     timeout_seconds: int = 30,
-    blind_schedule: list[tuple[int, int]] | None = None,
-    ante_schedule: list[int] | None = None,
+    level_schedule: list[tuple[int, int, int]] | None = None,
     rake_percent: float = 0.0,
     rake_cap: int | None = None,
     rake_min_pot: int | None = None,
@@ -78,9 +77,8 @@ PokerTable(
 )
 ```
 
-- `blind_schedule` を渡すと `[(small_blind, big_blind), ...]` のレベル表として管理される
-  (未指定時は `small_blind`/`big_blind` 引数を単一レベルとして使用)
-- `ante_schedule` を渡すと `[ante, ...]` のレベル表として管理される (未指定時はアンティなし = レベル0固定)
+- `level_schedule` を渡すと `[(small_blind, big_blind, ante), ...]` の1レベル=「SB/BB/アンティ」の
+  組としてまとめて管理される (未指定時は `small_blind`/`big_blind`/`ante` 引数を単一レベルとして使用)
 - `rake_percent` / `rake_cap` / `rake_min_pot` でレーキ(テラ銭)を設定できる。詳細は後述の「レーキ」節を参照
 - `allow_rebuy=False` にすると、一度チップ0でバストして除外されたプレイヤーIDは同じテーブルに
   `add_player()` で再参加できなくなり、`RebuyNotAllowedError` になる (バスト前の離脱・再入場は対象外)
@@ -94,8 +92,7 @@ PokerTable(
 | `start_game()` | ハンドを開始する。アンティ・ブラインド徴収 → ホールカード2枚配布 → PRE_FLOP開始。2人以上必要、クローズ後はエラー |
 | `action(player_id, action)` | 現在の手番プレイヤーのアクションを適用し、次の状態を返す |
 | `get_state(viewer_player_id=None)` | 現在の状態のスナップショットを取得。`viewer_player_id` を指定するとそのプレイヤーのホールカードのみ見える |
-| `level_up_blind()` | ブラインドレベルを1段階上昇させる (次のハンドから適用。最終レベル到達後は据え置き) |
-| `level_up_ante()` | アンティレベルを1段階上昇させる (次のハンドから適用。最終レベル到達後は据え置き) |
+| `level_up()` | SB/BB/アンティをまとめて1段階上昇させる (次のハンドから適用。最終レベル到達後は据え置き) |
 | `get_table_status()` | テーブルのライフサイクル状態 (`TableStatus`) を返す |
 
 ## ゲーム進行のルール
@@ -115,11 +112,11 @@ PokerTable(
 - アンティが設定されている場合、ブラインド徴収前に全プレイヤーから徴収されポットに加算される
   (チップ不足の場合は保有分のみ徴収し all-in 扱い)
 
-### ブラインド/アンティレベル
+### レベル (ブラインド/アンティ)
 
-- `level_up_blind()` / `level_up_ante()` を呼ぶたびにレベルが1段階進み、
-  以降の `start_game()` で新しいブラインド額・アンティ額が適用される
-  (呼び出し時点で進行中のハンドには影響しない)
+- SB/BB/アンティは1つの `level_schedule` で管理される単一のレベルカウンタ (`GameState.level`) を持つ
+- `level_up()` を呼ぶたびにレベルが1段階進み、以降の `start_game()` で
+  新しい SB/BB/アンティがまとめて適用される (呼び出し時点で進行中のハンドには影響しない)
 - 最終レベルに到達した状態でさらに呼び出しても、レベルは進まず据え置きになる
 
 ### テーブルのライフサイクル (`TableStatus`)
@@ -222,7 +219,7 @@ PokerTable(
 ## 状態・イベント型 (`game_state.py`)
 
 - **`GameState`**: テーブル全体の不変スナップショット (フェーズ、ポット、コミュニティカード、各プレイヤー状態、現在の手番、
-  `small_blind`/`big_blind`/`ante`、`blind_level`/`ante_level`、`status` (`TableStatus`)、
+  `small_blind`/`big_blind`/`ante`、`level`、`status` (`TableStatus`)、
   `side_pots` (`tuple[Pot, ...]`)、`rake_percent`/`rake_cap`/`rake_min_pot` など)
 - **`PlayerState`**: プレイヤー1人分のスナップショット。`hole_cards` は showdown時、または
   `get_state()` の `viewer_player_id` と一致する場合のみ公開される
@@ -231,8 +228,9 @@ PokerTable(
   `events` (発生したイベント列)、`waiting_for` (次に誰の・どのアクションを待っているか。ゲーム終了時は `None`)
 - **`GameEvent`** / **`EventType`**: `PLAYER_JOINED` / `PLAYER_LEFT` / `GAME_STARTED` / `HAND_DEALT` /
   `PLAYER_ACTED` / `ROUND_ENDED` / `COMMUNITY_DEALT` / `TURN_CHANGED` / `SHOWDOWN` /
-  `BLIND_LEVEL_UP` / `ANTE_LEVEL_UP` / `TABLE_CLOSED`
-  (`SHOWDOWN` の `payload` には `hands`/`pots`/`payouts`/`winner_id`/`rake` を含む)
+  `LEVEL_UP` / `TABLE_CLOSED`
+  (`SHOWDOWN` の `payload` には `hands`/`pots`/`payouts`/`winner_id`/`rake` を含む。
+  `LEVEL_UP` の `payload` には `level`/`small_blind`/`big_blind`/`ante` を含む)
 - **`WaitingFor`**: 次の手番プレイヤーID、取り得るアクション型のタプル、タイムアウト秒数
 - **`TableStatus`**: `RECRUITING` / `PLAYING` / `CLOSED` / `OTHER` (テーブルのライフサイクル状態。詳細は上記参照)
 
@@ -269,9 +267,8 @@ result = table.action("player_b", Call())
 result = table.action("player_c", Check())
 print(result.state.phase)             # GamePhase.FLOP
 
-# ブラインド/アンティレベルの上昇 (次のハンドから反映)
-table.level_up_blind()
-table.level_up_ante()
+# レベル (SB/BB/アンティ) の上昇 (次のハンドから反映)
+table.level_up()
 
 print(table.get_table_status())       # TableStatus.RECRUITING (SHOWDOWN/WAITING中)
 ```

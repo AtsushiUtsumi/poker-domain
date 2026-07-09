@@ -18,46 +18,67 @@ def _stacked_deck(order: list[Card]):
     return patch("poker_domain.deck.random.shuffle", fake_shuffle)
 
 
-def test_blind_level_up():
+def test_no_level_schedule_uses_single_level_from_arguments():
+    """level_schedule 未指定時は small_blind/big_blind/ante の単一レベルで初期化される"""
     table = PokerTable(
-        table_id="t1",
-        max_players=2,
-        blind_schedule=[(10, 20), (20, 40), (50, 100)],
+        table_id="t1", max_players=2, small_blind=10, big_blind=20, ante=5,
     )
     assert table.get_state().small_blind == Chips(10)
     assert table.get_state().big_blind == Chips(20)
-    assert table.get_state().blind_level == 0
+    assert table.get_state().ante == Chips(5)
+    assert table.get_state().level == 0
 
-    event = table.level_up_blind()
-    assert event.payload["level"] == 1
-    assert table.get_state().small_blind == Chips(20)
-    assert table.get_state().big_blind == Chips(40)
-
-    table.level_up_blind()
-    assert table.get_state().blind_level == 2
-
-    # 最終レベル到達後は据え置き
-    table.level_up_blind()
-    assert table.get_state().blind_level == 2
-    assert table.get_state().small_blind == Chips(50)
-    assert table.get_state().big_blind == Chips(100)
+    # 唯一(かつ最終)のレベルなので level_up() を呼んでも変化しない
+    table.level_up()
+    assert table.get_state().level == 0
+    assert table.get_state().small_blind == Chips(10)
+    assert table.get_state().big_blind == Chips(20)
+    assert table.get_state().ante == Chips(5)
 
 
-def test_ante_level_up_and_collection():
+def test_level_up_advances_blind_and_ante_together():
+    """level_schedule 指定時、level_up() のたびに SB/BB/アンティがまとめて次のレベルに進む"""
     table = PokerTable(
         table_id="t1",
         max_players=2,
-        small_blind=10,
-        big_blind=20,
-        ante_schedule=[0, 5],
+        level_schedule=[(10, 20, 0), (20, 40, 5), (50, 100, 10)],
     )
+    assert table.get_state().small_blind == Chips(10)
+    assert table.get_state().big_blind == Chips(20)
     assert table.get_state().ante == Chips(0)
+    assert table.get_state().level == 0
 
+    event = table.level_up()
+    assert event.payload == {"level": 1, "small_blind": 20, "big_blind": 40, "ante": 5}
+    assert table.get_state().level == 1
+    assert table.get_state().small_blind == Chips(20)
+    assert table.get_state().big_blind == Chips(40)
+    assert table.get_state().ante == Chips(5)
+
+    table.level_up()
+    assert table.get_state().level == 2
+    assert table.get_state().small_blind == Chips(50)
+    assert table.get_state().big_blind == Chips(100)
+    assert table.get_state().ante == Chips(10)
+
+    # 最終レベル到達後は据え置き
+    table.level_up()
+    assert table.get_state().level == 2
+    assert table.get_state().small_blind == Chips(50)
+    assert table.get_state().big_blind == Chips(100)
+    assert table.get_state().ante == Chips(10)
+
+
+def test_level_up_ante_is_collected_at_next_hand():
+    table = PokerTable(
+        table_id="t1",
+        max_players=2,
+        level_schedule=[(10, 20, 0), (10, 20, 5)],
+    )
     table.add_player("a", Chips(1000))
     table.add_player("b", Chips(1000))
 
-    table.level_up_ante()
-    assert table.get_state().ante_level == 1
+    table.level_up()
     assert table.get_state().ante == Chips(5)
 
     result = table.start_game()

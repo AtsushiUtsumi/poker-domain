@@ -37,13 +37,8 @@ class PokerTableInterface(ABC):
         ...
 
     @abstractmethod
-    def level_up_blind(self) -> GameEvent:
-        """ブラインドレベルを1段階上昇させる (最終レベルの場合は据え置き)"""
-        ...
-
-    @abstractmethod
-    def level_up_ante(self) -> GameEvent:
-        """アンティレベルを1段階上昇させる (最終レベルの場合は据え置き)"""
+    def level_up(self) -> GameEvent:
+        """ブラインド/アンティのレベルを1段階上昇させる (最終レベルの場合は据え置き)"""
         ...
 
     @abstractmethod

@@ -34,8 +34,7 @@ class EventType(Enum):
     COMMUNITY_DEALT = "community_dealt"
     TURN_CHANGED = "turn_changed"
     SHOWDOWN = "showdown"
-    BLIND_LEVEL_UP = "blind_level_up"
-    ANTE_LEVEL_UP = "ante_level_up"
+    LEVEL_UP = "level_up"
     TABLE_CLOSED = "table_closed"
 
 
@@ -85,8 +84,7 @@ class GameState:
     small_blind: Chips
     big_blind: Chips
     ante: Chips
-    blind_level: int
-    ante_level: int
+    level: int
     status: TableStatus
     side_pots: tuple[Pot, ...]
     rake_percent: float
