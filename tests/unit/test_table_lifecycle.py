@@ -7,7 +7,7 @@ from poker_domain.value_objects.chips import Chips
 from poker_domain.value_objects.card import Card, Suit, Rank
 from poker_domain.value_objects.action import Call, Check, Raise, Fold
 from poker_domain.game_state import GamePhase, TableStatus
-from poker_domain.exceptions import TableClosedError
+from poker_domain.exceptions import TableClosedError, RebuyNotAllowedError
 
 
 def _stacked_deck(order: list[Card]):
@@ -301,6 +301,57 @@ def test_three_handed_game_progresses_after_a_player_busts():
         assert remaining_ids == {"a", "b"}
         assert result.state.current_player_id == "a"
         assert result.state.pot.amount == 30  # SB(10) + BB(20)
+
+
+def test_rebuy_disallowed_after_bust_when_allow_rebuy_is_false():
+    """allow_rebuy=False の卓では、バストして除外されたプレイヤーIDは再度 add_player できない"""
+    with _stacked_deck(_BUST_ROTATION_DECK):
+        table = PokerTable(
+            table_id="t1", max_players=3, small_blind=10, big_blind=20,
+            allow_rebuy=False,
+        )
+        table.add_player("a", Chips(1000))
+        table.add_player("b", Chips(1000))
+        table.add_player("c", Chips(100))
+
+        # ── ハンド1: a, b が降りて c の不戦勝 (誰もバストしない) ──
+        table.start_game()
+        table.action("a", Fold())
+        table.action("b", Fold())
+
+        # ── ハンド2: c がオールインして敗北しバストする ──
+        table.start_game()
+        table.action("b", Call())
+        table.action("c", Raise(amount=110))
+        table.action("a", Call())
+        result = table.action("b", Call())
+        assert result.state.phase == GamePhase.FLOP
+
+        for _ in range(3):
+            for pid in ("a", "b"):
+                result = table.action(pid, Check())
+        assert result.state.phase == GamePhase.SHOWDOWN
+
+        # ── ハンド3: バストした c を除外する後片付けが start_game() 内で走り、a, b のみで開始 ──
+        result = table.start_game()
+        assert result.state.phase == GamePhase.PRE_FLOP
+        current = result.state.current_player_id
+        result = table.action(current, Fold())  # 即座に不戦勝で SHOWDOWN へ
+        assert result.state.phase == GamePhase.SHOWDOWN
+
+        with pytest.raises(RebuyNotAllowedError):
+            table.add_player("c", Chips(500))
+
+
+def test_rebuy_allowed_for_voluntary_leave_even_when_disallowed():
+    """バスト経由ではない自発的な離脱者は、allow_rebuy=False でも再入場できる"""
+    table = PokerTable(table_id="t1", max_players=2, allow_rebuy=False)
+    table.add_player("a", Chips(1000))
+    table.add_player("b", Chips(1000))
+    table.remove_player("b")
+
+    event = table.add_player("b", Chips(1000))
+    assert event.payload["player_id"] == "b"
 
 
 def test_get_state_survives_remove_player_after_showdown_when_indices_become_stale():

@@ -24,6 +24,7 @@ from poker_domain.exceptions import (
     NotEnoughPlayersError,
     GameAlreadyStartedError,
     TableClosedError,
+    RebuyNotAllowedError,
 )
 
 
@@ -45,10 +46,15 @@ class PokerTable(PokerTableInterface):
         rake_percent: float = 0.0,
         rake_cap: int | None = None,
         rake_min_pot: int | None = None,
+        allow_rebuy: bool = True,
     ) -> None:
         self._table_id = table_id
         self._max_players = max_players
         self._timeout_seconds = timeout_seconds
+
+        # リバイ設定: False の場合、一度バスト(チップ0で除外)したプレイヤーは再参加できない
+        self._allow_rebuy = allow_rebuy
+        self._busted_player_ids: set[str] = set()
 
         # レーキ設定 (ショーダウンで決着したポットにのみ適用。不戦勝には適用しない)
         self._rake_percent = rake_percent
@@ -93,6 +99,8 @@ class PokerTable(PokerTableInterface):
             raise GameAlreadyStartedError("ゲーム進行中にはプレイヤーを追加できません")
         if any(p.player_id == player_id for p in self._players):
             raise InvalidPlayerError(f"{player_id} は既に参加しています")
+        if not self._allow_rebuy and player_id in self._busted_player_ids:
+            raise RebuyNotAllowedError(f"{player_id} はバスト済みのためリバイ禁止テーブルに再参加できません")
 
         self._players.append(Player(player_id=player_id, chips=chips))
         self._has_had_players = True
@@ -153,7 +161,8 @@ class PokerTable(PokerTableInterface):
             seating_order = [self._players[(self._dealer_index + 1 + i) % n] for i in range(n)]
             next_dealer = next((p for p in seating_order if p.chips.amount > 0), None)
 
-            # チップが0のプレイヤーは除外
+            # チップが0のプレイヤーは除外 (リバイ禁止判定のためバストしたIDを記録しておく)
+            self._busted_player_ids |= {p.player_id for p in self._players if p.chips.amount == 0}
             self._players = [p for p in self._players if p.chips.amount > 0]
 
             if next_dealer is not None:

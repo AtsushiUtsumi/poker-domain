@@ -28,6 +28,7 @@ from poker_domain.exceptions import (
     GameAlreadyStartedError,
     DeckEmptyError,
     TableClosedError,
+    RebuyNotAllowedError,
 )
 
 __all__ = [
@@ -60,4 +61,5 @@ __all__ = [
     "GameAlreadyStartedError",
     "DeckEmptyError",
     "TableClosedError",
+    "RebuyNotAllowedError",
 ]

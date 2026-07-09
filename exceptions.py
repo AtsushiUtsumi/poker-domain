@@ -41,3 +41,8 @@ class DeckEmptyError(PokerError):
 class TableClosedError(PokerError):
     """クローズしたテーブルに対する操作"""
     pass
+
+
+class RebuyNotAllowedError(PokerError):
+    """リバイ禁止テーブルで、バストしたプレイヤーが再参加しようとした"""
+    pass

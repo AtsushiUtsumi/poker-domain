@@ -73,6 +73,7 @@ PokerTable(
     rake_percent: float = 0.0,
     rake_cap: int | None = None,
     rake_min_pot: int | None = None,
+    allow_rebuy: bool = True,
 )
 ```
 
@@ -80,10 +81,12 @@ PokerTable(
   (未指定時は `small_blind`/`big_blind` 引数を単一レベルとして使用)
 - `ante_schedule` を渡すと `[ante, ...]` のレベル表として管理される (未指定時はアンティなし = レベル0固定)
 - `rake_percent` / `rake_cap` / `rake_min_pot` でレーキ(テラ銭)を設定できる。詳細は後述の「レーキ」節を参照
+- `allow_rebuy=False` にすると、一度チップ0でバストして除外されたプレイヤーIDは同じテーブルに
+  `add_player()` で再参加できなくなり、`RebuyNotAllowedError` になる (バスト前の離脱・再入場は対象外)
 
 | メソッド | 説明 |
 |---|---|
-| `add_player(player_id, chips)` | プレイヤーを着席させる。満席・進行中・重複参加・クローズ後はエラー |
+| `add_player(player_id, chips)` | プレイヤーを着席させる。満席・進行中・重複参加・クローズ後・リバイ禁止時のバスト済みIDはエラー |
 | `remove_player(player_id)` | プレイヤーを離席させる。進行中は不可。全員離脱すると卓は自動的にクローズする |
 | `start_game()` | ハンドを開始する。アンティ・ブラインド徴収 → ホールカード2枚配布 → PRE_FLOP開始。2人以上必要、クローズ後はエラー |
 | `action(player_id, action)` | 現在の手番プレイヤーのアクションを適用し、次の状態を返す |
@@ -131,6 +134,14 @@ PokerTable(
 - 一度でもプレイヤーが着席したテーブルで、`remove_player()` により全員が離脱した場合
 - ハンド終了後、チップを保有する生存プレイヤーが1人以下になった場合
   (人数に関わらず、その時点で対戦相手がいなくなった全てのケースを含む)
+
+### リバイ
+
+- `PokerTable(..., allow_rebuy=False)` で作成すると、ハンド終了時にチップ0で除外(バスト)された
+  プレイヤーIDを記憶し、以後同じIDで `add_player()` を呼んでも `RebuyNotAllowedError` になる
+- バストする前に自発的に `remove_player()` で離脱したプレイヤーの再入場は制限されない
+  (制限対象はあくまで「チップを失って強制退席したプレイヤー」)
+- 既定値は `allow_rebuy=True` で、従来通り誰でも何度でも再参加できる
 
 ### アクション (`value_objects/action.py`)
 
@@ -224,6 +235,7 @@ PokerTable(
 - `GameAlreadyStartedError`
 - `DeckEmptyError`
 - `TableClosedError`
+- `RebuyNotAllowedError`
 
 ## 使用例
 
