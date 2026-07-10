@@ -192,6 +192,17 @@ PokerTable(
 - `ActionResult.events` の `SHOWDOWN` イベントの `payload` にも `pots` (分配後のポット内訳)、
   `payouts` (プレイヤーIDごとの獲得額)、`winner_id` (最大獲得額のプレイヤー、後方互換用)、`rake` が含まれる
 
+### アクション履歴 (`action_log`)
+
+- `GameState.action_log` (`tuple[ActionLogEntry, ...]`) に、進行中のハンドでプレイヤーが取った
+  アクションが取られた順番に記録される
+- `ActionLogEntry` は `player_id` / `phase` (アクションを取った時点の `GamePhase`) / `action`
+  (`"fold"` / `"check"` / `"call"` / `"bet"` / `"raise"`) / `amount` (`bet`/`raise` の場合のみ金額、
+  それ以外は `None`) を持つ
+- アンティ・ブラインドの自動徴収は「プレイヤーが選んだアクション」ではないため記録されない
+  (`PLAYER_ACTED` イベントも同様にブラインド/アンティでは発火しない)
+- `start_game()` を呼ぶたびに空にリセットされる (ショーダウン後〜次ハンド開始前の履歴は保持されない)
+
 ### レーキ
 
 - `rake_percent`: ポット合計に対するレーキ率 (例: `0.05` = 5%)
@@ -220,10 +231,14 @@ PokerTable(
 
 - **`GameState`**: テーブル全体の不変スナップショット (フェーズ、ポット、コミュニティカード、各プレイヤー状態、現在の手番、
   `small_blind`/`big_blind`/`ante`、`level`、`status` (`TableStatus`)、
-  `side_pots` (`tuple[Pot, ...]`)、`rake_percent`/`rake_cap`/`rake_min_pot` など)
+  `side_pots` (`tuple[Pot, ...]`)、`rake_percent`/`rake_cap`/`rake_min_pot`、
+  `action_log` (`tuple[ActionLogEntry, ...]`) など)
 - **`PlayerState`**: プレイヤー1人分のスナップショット。`hole_cards` は showdown時、または
   `get_state()` の `viewer_player_id` と一致する場合のみ公開される
 - **`Pot`**: サイドポットの1枠。`amount: Chips` と `eligible_player_ids: tuple[str, ...]` を持つ
+- **`ActionLogEntry`**: 進行中のハンドでプレイヤーが取ったアクション1件分の履歴。
+  `player_id` / `phase` / `action` (`"fold"`/`"check"`/`"call"`/`"bet"`/`"raise"`) / `amount` を持つ。
+  詳細は上記「アクション履歴 (`action_log`)」節を参照
 - **`ActionResult`**: `action()` / `start_game()` の戻り値。`state` (最新スナップショット)、
   `events` (発生したイベント列)、`waiting_for` (次に誰の・どのアクションを待っているか。ゲーム終了時は `None`)
 - **`GameEvent`** / **`EventType`**: `PLAYER_JOINED` / `PLAYER_LEFT` / `GAME_STARTED` / `HAND_DEALT` /

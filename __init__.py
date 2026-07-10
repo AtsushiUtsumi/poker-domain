@@ -16,6 +16,7 @@ from poker_domain.game_state import (
     PlayerState,
     TableStatus,
     Pot,
+    ActionLogEntry,
 )
 from poker_domain.player import Player
 from poker_domain.exceptions import (
@@ -50,6 +51,7 @@ __all__ = [
     "PlayerState",
     "TableStatus",
     "Pot",
+    "ActionLogEntry",
     # エンティティ
     "Player",
     # 例外

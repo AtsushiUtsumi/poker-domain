@@ -60,6 +60,15 @@ class WaitingFor:
 
 
 @dataclass(frozen=True)
+class ActionLogEntry:
+    """ハンド内でプレイヤーが取ったアクション1件分の履歴"""
+    player_id: str
+    phase: GamePhase      # アクションを取った時点のフェーズ (PRE_FLOP/FLOP/TURN/RIVER)
+    action: str           # "fold" | "check" | "call" | "bet" | "raise"
+    amount: int | None    # bet/raise の場合のみ金額、それ以外は None
+
+
+@dataclass(frozen=True)
 class PlayerState:
     """スナップショット用のプレイヤー状態 (不変)"""
     player_id: str
@@ -90,6 +99,7 @@ class GameState:
     rake_percent: float
     rake_cap: int | None
     rake_min_pot: int | None
+    action_log: tuple[ActionLogEntry, ...]
 
 
 @dataclass(frozen=True)

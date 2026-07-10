@@ -12,6 +12,7 @@ from poker_domain.game_state import (
     PlayerState,
     TableStatus,
     Pot,
+    ActionLogEntry,
 )
 from poker_domain.player import Player
 from poker_domain.deck import Deck
@@ -84,6 +85,9 @@ class PokerTable(PokerTableInterface):
 
         # 現在のラウンドでまだアクション未済のプレイヤーインデックス
         self._players_to_act: set[int] = set()
+
+        # 進行中のハンド内で各プレイヤーが取ったアクションの履歴 (次ハンド開始時にリセット)
+        self._action_log: list[ActionLogEntry] = []
 
         # テーブルのライフサイクル管理
         self._closed: bool = False
@@ -182,6 +186,7 @@ class PokerTable(PokerTableInterface):
         self._pot = Chips(0)
         self._current_bet = Chips(0)
         self._community_cards = ()
+        self._action_log = []
 
         # ── アンティ徴収 ──
         self._collect_antes(events)
@@ -230,6 +235,7 @@ class PokerTable(PokerTableInterface):
 
         self._validate_action(player, action)
         self._apply_action(player, action)
+        self._record_action(player, action)
 
         events: list[GameEvent] = [
             GameEvent(
@@ -367,6 +373,28 @@ class PokerTable(PokerTableInterface):
                     i for i, p in enumerate(self._players)
                     if p.is_active and i != self._current_player_index
                 }
+
+    # ── アクション履歴記録 ──
+
+    def _record_action(self, player: Player, action: Action) -> None:
+        match action:
+            case Fold():
+                action_name, amount = "fold", None
+            case Check():
+                action_name, amount = "check", None
+            case Call():
+                action_name, amount = "call", None
+            case Bet(amount=amount):
+                action_name = "bet"
+            case Raise(amount=amount):
+                action_name = "raise"
+
+        self._action_log.append(ActionLogEntry(
+            player_id=player.player_id,
+            phase=self._phase,
+            action=action_name,
+            amount=amount,
+        ))
 
     # ── ブラインド徴収 ──
 
@@ -751,6 +779,7 @@ class PokerTable(PokerTableInterface):
             rake_percent=self._rake_percent,
             rake_cap=self._rake_cap,
             rake_min_pot=self._rake_min_pot,
+            action_log=tuple(self._action_log),
         )
 
     # ── WaitingFor 生成 ──
