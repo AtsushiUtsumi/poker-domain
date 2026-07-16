@@ -308,7 +308,8 @@ class PokerTable(PokerTableInterface):
             case Bet(amount=amount):
                 if self._current_bet.amount > 0:
                     raise InvalidActionError("既にベットがある場合は Raise を使ってください")
-                if amount < self._big_blind.amount:
+                is_all_in_bet = amount == player.chips.amount
+                if amount < self._big_blind.amount and not is_all_in_bet:
                     raise InvalidActionError(f"最小ベットは {self._big_blind.amount} です")
                 if amount > player.chips.amount:
                     raise InsufficientChipsError("チップ不足です")
