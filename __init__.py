@@ -1,5 +1,6 @@
 from poker_domain.table import PokerTable
 from poker_domain.interfaces import PokerTableInterface
+from poker_domain.hand_evaluator import HandEvaluator
 from poker_domain.value_objects import (
     Action, Fold, Check, Call, Bet, Raise,
     Card, Suit, Rank,
@@ -39,6 +40,7 @@ __all__ = [
     # テーブル
     "PokerTable",
     "PokerTableInterface",
+    "HandEvaluator",
     # 値オブジェクト
     "Action", "Fold", "Check", "Call", "Bet", "Raise",
     "Card", "Suit", "Rank",
