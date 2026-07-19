@@ -52,11 +52,63 @@ class HandEvaluator:
         counts: Counter[HandRank] = Counter()
         total = 0
         for draw in combinations(remaining, cards_to_come):
-            hand = HandEvaluator.evaluate(board + draw + hole)
-            counts[hand.rank] += 1
+            # 確率分布の集計には役カテゴリのみ必要なため、タイブレーカーまで計算する
+            # evaluate() ではなく classify_category() で高速に判定する
+            category = HandEvaluator.classify_category(board + draw + hole)
+            counts[category] += 1
             total += 1
 
         return {rank: counts.get(rank, 0) / total for rank in HandRank}
+
+    @staticmethod
+    def classify_category(cards: tuple[Card, ...]) -> HandRank:
+        """
+        5枚以上のカードから、最も強い5枚の組み合わせの役カテゴリだけを判定する。
+        evaluate() と違い、全 C(n,5) 組み合わせを列挙せずタイブレーカーも算出しないため、
+        確率分布計算のように大量呼び出しが必要で役カテゴリのみあれば足りる用途に向く。
+        """
+        if len(cards) < 5:
+            raise ValueError("役を判定するには5枚以上のカードが必要です")
+
+        ranks = [c.rank.value for c in cards]
+        suits = [c.suit for c in cards]
+
+        suit_counts = Counter(suits)
+        flush_suit = next((s for s, cnt in suit_counts.items() if cnt >= 5), None)
+
+        if flush_suit is not None:
+            flush_ranks = sorted({r for r, s in zip(ranks, suits) if s == flush_suit}, reverse=True)
+            sf_high = HandEvaluator._best_straight_high(flush_ranks)
+            if sf_high is not None:
+                return HandRank.ROYAL_FLUSH if sf_high == 14 else HandRank.STRAIGHT_FLUSH
+
+        rank_counts = Counter(ranks)
+        by_count = sorted(rank_counts.items(), key=lambda kv: (kv[1], kv[0]), reverse=True)
+        pattern = tuple(c for _, c in by_count)
+
+        if pattern[0] == 4:
+            return HandRank.FOUR_OF_A_KIND
+
+        if pattern[0] == 3 and len(pattern) > 1 and pattern[1] >= 2:
+            return HandRank.FULL_HOUSE
+
+        if flush_suit is not None:
+            return HandRank.FLUSH
+
+        straight_high = HandEvaluator._best_straight_high(sorted(set(ranks), reverse=True))
+        if straight_high is not None:
+            return HandRank.STRAIGHT
+
+        if pattern[0] == 3:
+            return HandRank.THREE_OF_A_KIND
+
+        if pattern[0] == 2 and pattern.count(2) >= 2:
+            return HandRank.TWO_PAIR
+
+        if pattern[0] == 2:
+            return HandRank.ONE_PAIR
+
+        return HandRank.HIGH_CARD
 
     @staticmethod
     def compare(hand_a: Hand, hand_b: Hand) -> int:
@@ -122,6 +174,20 @@ class HandEvaluator:
             return Hand(cards=cards, rank=HandRank.ONE_PAIR, tiebreakers=(pair_rank, *kickers))
 
         return Hand(cards=cards, rank=HandRank.HIGH_CARD, tiebreakers=tuple(ranks))
+
+    @staticmethod
+    def _best_straight_high(desc_unique_ranks: list[int]) -> int | None:
+        """
+        降順・重複なしのランク列(5枚超も可)から、最も高いストレートの最上位ランクを返す
+        (無ければNone)。ホイール(A-2-3-4-5)はAを1として末尾に加えて判定する。
+        """
+        values = desc_unique_ranks
+        if 14 in values and 1 not in values:
+            values = values + [1]
+        for i in range(len(values) - 4):
+            if values[i] - values[i + 4] == 4:
+                return values[i]
+        return None
 
     @staticmethod
     def _check_straight(ranks: list[int]) -> tuple[bool, int]:
