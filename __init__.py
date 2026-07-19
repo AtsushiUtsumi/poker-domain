@@ -4,7 +4,9 @@ from poker_domain.value_objects import (
     Action, Fold, Check, Call, Bet, Raise,
     Card, Suit, Rank,
     Chips,
+    CommunityCards,
     Hand, HandRank,
+    HoleCards,
 )
 from poker_domain.game_state import (
     GamePhase,
@@ -41,7 +43,9 @@ __all__ = [
     "Action", "Fold", "Check", "Call", "Bet", "Raise",
     "Card", "Suit", "Rank",
     "Chips",
+    "CommunityCards",
     "Hand", "HandRank",
+    "HoleCards",
     # ゲーム状態
     "GamePhase",
     "GameEvent", "EventType",

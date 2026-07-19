@@ -1,7 +1,8 @@
 from poker_domain.interfaces import PokerTableInterface
 from poker_domain.value_objects.action import Action, Fold, Check, Call, Bet, Raise
-from poker_domain.value_objects.card import Card
 from poker_domain.value_objects.chips import Chips
+from poker_domain.value_objects.community_cards import CommunityCards
+from poker_domain.value_objects.hole_cards import HoleCards
 from poker_domain.game_state import (
     GamePhase,
     GameEvent,
@@ -79,7 +80,7 @@ class PokerTable(PokerTableInterface):
         self._deck: Deck = Deck()
         self._pot: Chips = Chips(0)
         self._current_bet: Chips = Chips(0)
-        self._community_cards: tuple[Card, ...] = ()
+        self._community_cards: CommunityCards = CommunityCards()
         self._dealer_index: int = 0
         self._current_player_index: int = 0
 
@@ -185,7 +186,7 @@ class PokerTable(PokerTableInterface):
         self._deck.shuffle()
         self._pot = Chips(0)
         self._current_bet = Chips(0)
-        self._community_cards = ()
+        self._community_cards = CommunityCards()
         self._action_log = []
 
         # ── アンティ徴収 ──
@@ -463,7 +464,7 @@ class PokerTable(PokerTableInterface):
                 idx = (self._dealer_index + 1 + i) % len(self._players)
                 player = self._players[idx]
                 if player.is_in_hand:
-                    player.hole_cards = player.hole_cards + self._deck.deal(1)
+                    player.hole_cards = HoleCards(player.hole_cards + self._deck.deal(1))
 
     # ── フェーズ遷移 ──
 
@@ -478,9 +479,9 @@ class PokerTable(PokerTableInterface):
         # コミュニティカード配布
         match self._phase:
             case GamePhase.FLOP:
-                self._community_cards = self._community_cards + self._deck.deal(3)
+                self._community_cards = CommunityCards(self._community_cards + self._deck.deal(3))
             case GamePhase.TURN | GamePhase.RIVER:
-                self._community_cards = self._community_cards + self._deck.deal(1)
+                self._community_cards = CommunityCards(self._community_cards + self._deck.deal(1))
 
         events.append(GameEvent(
             event_type=EventType.COMMUNITY_DEALT,
@@ -517,9 +518,9 @@ class PokerTable(PokerTableInterface):
             self._phase = next_phase[self._phase]
             match self._phase:
                 case GamePhase.FLOP:
-                    self._community_cards = self._community_cards + self._deck.deal(3)
+                    self._community_cards = CommunityCards(self._community_cards + self._deck.deal(3))
                 case GamePhase.TURN | GamePhase.RIVER:
-                    self._community_cards = self._community_cards + self._deck.deal(1)
+                    self._community_cards = CommunityCards(self._community_cards + self._deck.deal(1))
             events.append(GameEvent(
                 event_type=EventType.COMMUNITY_DEALT,
                 payload={"community_cards": self._community_cards},

@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 
-from poker_domain.value_objects.card import Card
 from poker_domain.value_objects.chips import Chips
+from poker_domain.value_objects.hole_cards import HoleCards
 
 
 @dataclass
@@ -10,7 +10,7 @@ class Player:
 
     player_id: str
     chips: Chips
-    hole_cards: tuple[Card, ...] = ()
+    hole_cards: HoleCards = field(default_factory=HoleCards)
     current_bet: Chips = field(default_factory=lambda: Chips(0))
     folded: bool = False
     is_all_in: bool = False
@@ -18,7 +18,7 @@ class Player:
 
     def reset_for_new_hand(self) -> None:
         """次のハンド開始時のリセット"""
-        self.hole_cards = ()
+        self.hole_cards = HoleCards()
         self.current_bet = Chips(0)
         self.folded = False
         self.is_all_in = False

@@ -2,9 +2,10 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-from poker_domain.value_objects.card import Card
 from poker_domain.value_objects.chips import Chips
 from poker_domain.value_objects.action import Action
+from poker_domain.value_objects.community_cards import CommunityCards
+from poker_domain.value_objects.hole_cards import HoleCards
 
 
 class GamePhase(Enum):
@@ -76,7 +77,7 @@ class PlayerState:
     current_bet: Chips
     folded: bool
     is_all_in: bool
-    hole_cards: tuple[Card, ...] | None  # viewer のカードだけ見える
+    hole_cards: HoleCards | None  # viewer のカードだけ見える
 
 
 @dataclass(frozen=True)
@@ -86,7 +87,7 @@ class GameState:
     phase: GamePhase
     pot: Chips
     current_bet: Chips
-    community_cards: tuple[Card, ...]
+    community_cards: CommunityCards
     players: tuple[PlayerState, ...]
     current_player_id: str | None
     dealer_id: str
