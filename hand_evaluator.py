@@ -13,20 +13,20 @@ class HandEvaluator:
     @staticmethod
     def evaluate(cards: tuple[Card, ...]) -> Hand:
         """7枚(ホール2枚 + コミュニティ5枚)から最強の手を返す"""
+        if len(cards) < 5:
+            raise ValueError("役を判定するには5枚以上のカードが必要です")
         best: Hand | None = None
         for combo in combinations(cards, 5):
             hand = HandEvaluator._evaluate_five(tuple(combo))
             if best is None or HandEvaluator.compare(hand, best) > 0:
                 best = hand
-        return best  # type: ignore
+        assert best is not None
+        return best
 
     @staticmethod
     def evaluate_hand(hole_cards: HoleCards, community_cards: CommunityCards) -> Hand:
         """手札とコミュニティカードを合わせた現状の役を返す (合計5枚未満の場合は評価不可)"""
-        combined = tuple(hole_cards) + tuple(community_cards)
-        if len(combined) < 5:
-            raise ValueError("役を判定するには合計5枚以上のカードが必要です")
-        return HandEvaluator.evaluate(combined)
+        return HandEvaluator.evaluate(tuple(hole_cards) + tuple(community_cards))
 
     @staticmethod
     def river_probabilities(hole_cards: HoleCards, community_cards: CommunityCards) -> dict[HandRank, float]:

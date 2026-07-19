@@ -2,6 +2,7 @@ from poker_domain.interfaces import PokerTableInterface
 from poker_domain.value_objects.action import Action, Fold, Check, Call, Bet, Raise
 from poker_domain.value_objects.chips import Chips
 from poker_domain.value_objects.community_cards import CommunityCards
+from poker_domain.value_objects.hand import Hand
 from poker_domain.value_objects.hole_cards import HoleCards
 from poker_domain.game_state import (
     GamePhase,
@@ -574,7 +575,7 @@ class PokerTable(PokerTableInterface):
         self._phase = GamePhase.SHOWDOWN
         in_hand = self._get_in_hand_players()
 
-        hands_log: dict[str, object] = {
+        hands_log: dict[str, Hand] = {
             player.player_id: HandEvaluator.evaluate(player.hole_cards + self._community_cards)
             for player in in_hand
         }
@@ -637,20 +638,20 @@ class PokerTable(PokerTableInterface):
             pots.append(Pot(amount=Chips(tier * len(contributors)), eligible_player_ids=eligible))
         return tuple(pots)
 
-    def _distribute_pot(self, pot: Pot, hands: dict[str, object]) -> dict[str, int]:
+    def _distribute_pot(self, pot: Pot, hands: dict[str, Hand]) -> dict[str, int]:
         """1つのポットについて、対象者内で最強のハンドに (同点なら等分で) 配る"""
         eligible = [p for p in self._players if p.player_id in pot.eligible_player_ids]
         if not eligible:
             return {}
 
-        best_hand = None
+        best_hand: Hand | None = None
         winners: list[Player] = []
         for player in eligible:
             hand = hands[player.player_id]
             if best_hand is None:
                 best_hand, winners = hand, [player]
                 continue
-            cmp = HandEvaluator.compare(hand, best_hand)  # type: ignore[arg-type]
+            cmp = HandEvaluator.compare(hand, best_hand)
             if cmp > 0:
                 best_hand, winners = hand, [player]
             elif cmp == 0:
