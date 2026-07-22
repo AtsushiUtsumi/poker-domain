@@ -337,12 +337,12 @@ class PokerTable(PokerTableInterface):
             case Call():
                 # 不足していれば保有チップ全額でのオールインコールとする (サイドポットの発生源)
                 diff = self._current_bet.amount - player.current_bet.amount
-                paid = player.contribute(diff)
+                paid = player._contribute(diff)
                 self._pot = self._pot + Chips(paid)
                 self._players_to_act.discard(self._current_player_index)
 
             case Bet(amount=amount):
-                paid = player.contribute(amount)
+                paid = player._contribute(amount)
                 self._current_bet = Chips(amount)
                 self._pot = self._pot + Chips(paid)
                 # Bet → 他の全アクティブプレイヤーを to_act に戻す
@@ -353,7 +353,7 @@ class PokerTable(PokerTableInterface):
 
             case Raise(amount=amount):
                 diff = amount - player.current_bet.amount
-                paid = player.contribute(diff)
+                paid = player._contribute(diff)
                 self._current_bet = Chips(amount)
                 self._pot = self._pot + Chips(paid)
                 # Raise → 他の全アクティブプレイヤーを to_act に戻す
@@ -401,7 +401,7 @@ class PokerTable(PokerTableInterface):
 
     def _pay_blind(self, player_index: int, blind: Chips) -> None:
         player = self._players[player_index]
-        paid = player.contribute(blind.amount)
+        paid = player._contribute(blind.amount)
         self._pot = self._pot + Chips(paid)
 
     # ── アンティ徴収 ──
@@ -410,7 +410,7 @@ class PokerTable(PokerTableInterface):
         if self._ante.amount <= 0:
             return
         for player in self._players:
-            paid = player.contribute(self._ante.amount)
+            paid = player._contribute(self._ante.amount)
             self._pot = self._pot + Chips(paid)
 
     # ── レベル ──

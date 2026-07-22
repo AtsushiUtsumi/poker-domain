@@ -24,7 +24,7 @@ class Player:
         self.is_all_in = False
         self.total_contributed = Chips(0)
 
-    def contribute(self, amount: int) -> int:
+    def _contribute(self, amount: int) -> int:
         """
         チップを拠出する (ブラインド/アンティ/コール/ベット/レイズの共通処理)。
         保有チップ不足の場合は保有額全額に切り詰め、拠出後に0になれば is_all_in にする。
