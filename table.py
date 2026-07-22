@@ -336,26 +336,15 @@ class PokerTable(PokerTableInterface):
 
             case Call():
                 # 不足していれば保有チップ全額でのオールインコールとする (サイドポットの発生源)
-                diff = min(
-                    self._current_bet.amount - player.current_bet.amount,
-                    player.chips.amount,
-                )
-                player.chips = Chips(player.chips.amount - diff)
-                player.current_bet = player.current_bet + Chips(diff)
-                player.total_contributed = player.total_contributed + Chips(diff)
-                self._pot = self._pot + Chips(diff)
+                diff = self._current_bet.amount - player.current_bet.amount
+                paid = player.contribute(diff)
+                self._pot = self._pot + Chips(paid)
                 self._players_to_act.discard(self._current_player_index)
-                if player.chips.amount == 0:
-                    player.is_all_in = True
 
             case Bet(amount=amount):
-                player.chips = Chips(player.chips.amount - amount)
-                player.current_bet = Chips(amount)
-                player.total_contributed = player.total_contributed + Chips(amount)
+                paid = player.contribute(amount)
                 self._current_bet = Chips(amount)
-                self._pot = self._pot + Chips(amount)
-                if player.chips.amount == 0:
-                    player.is_all_in = True
+                self._pot = self._pot + Chips(paid)
                 # Bet → 他の全アクティブプレイヤーを to_act に戻す
                 self._players_to_act = {
                     i for i, p in enumerate(self._players)
@@ -364,13 +353,9 @@ class PokerTable(PokerTableInterface):
 
             case Raise(amount=amount):
                 diff = amount - player.current_bet.amount
-                player.chips = Chips(player.chips.amount - diff)
-                player.current_bet = Chips(amount)
-                player.total_contributed = player.total_contributed + Chips(diff)
+                paid = player.contribute(diff)
                 self._current_bet = Chips(amount)
-                self._pot = self._pot + Chips(diff)
-                if player.chips.amount == 0:
-                    player.is_all_in = True
+                self._pot = self._pot + Chips(paid)
                 # Raise → 他の全アクティブプレイヤーを to_act に戻す
                 self._players_to_act = {
                     i for i, p in enumerate(self._players)
@@ -416,13 +401,8 @@ class PokerTable(PokerTableInterface):
 
     def _pay_blind(self, player_index: int, blind: Chips) -> None:
         player = self._players[player_index]
-        amount = min(blind.amount, player.chips.amount)
-        player.chips = Chips(player.chips.amount - amount)
-        player.current_bet = Chips(amount)
-        player.total_contributed = player.total_contributed + Chips(amount)
-        self._pot = self._pot + Chips(amount)
-        if player.chips.amount == 0:
-            player.is_all_in = True
+        paid = player.contribute(blind.amount)
+        self._pot = self._pot + Chips(paid)
 
     # ── アンティ徴収 ──
 
@@ -430,12 +410,8 @@ class PokerTable(PokerTableInterface):
         if self._ante.amount <= 0:
             return
         for player in self._players:
-            amount = min(self._ante.amount, player.chips.amount)
-            player.chips = Chips(player.chips.amount - amount)
-            player.total_contributed = player.total_contributed + Chips(amount)
-            self._pot = self._pot + Chips(amount)
-            if player.chips.amount == 0:
-                player.is_all_in = True
+            paid = player.contribute(self._ante.amount)
+            self._pot = self._pot + Chips(paid)
 
     # ── レベル ──
 
