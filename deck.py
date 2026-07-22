@@ -7,7 +7,10 @@ from poker_domain.exceptions import DeckEmptyError
 class Deck:
     """52枚のカードデック"""
 
-    def __init__(self) -> None:
+    def __init__(self, rng: random.Random | None = None) -> None:
+        # rng 未指定時は random モジュールをそのまま使う (従来通り random.shuffle を差し替えて
+        # テストできる)。random.Random インスタンスを渡せばデッキごとに独立した乱数系列にできる
+        self._rng = rng if rng is not None else random
         self._cards: list[Card] = [
             Card(suit=suit, rank=rank)
             for suit in Suit
@@ -15,7 +18,7 @@ class Deck:
         ]
 
     def shuffle(self) -> None:
-        random.shuffle(self._cards)
+        self._rng.shuffle(self._cards)
 
     def deal(self, count: int = 1) -> tuple[Card, ...]:
         if len(self._cards) < count:
