@@ -1,6 +1,8 @@
 import pytest
+
 from poker_domain.deck import Deck
 from poker_domain.exceptions import DeckEmptyError
+
 
 def test_deck_initialization():
     deck = Deck()

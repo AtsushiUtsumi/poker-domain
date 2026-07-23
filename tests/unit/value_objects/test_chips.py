@@ -1,5 +1,7 @@
 import pytest
+
 from poker_domain.value_objects.chips import Chips
+
 
 def test_chips_creation():
     chips = Chips(100)

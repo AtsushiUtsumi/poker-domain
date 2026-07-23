@@ -1,4 +1,5 @@
-from poker_domain.value_objects.card import Card, Suit, Rank
+from poker_domain.value_objects.card import Card, Rank, Suit
+
 
 def test_card_creation():
     card = Card(Suit.HEARTS, Rank.ACE)

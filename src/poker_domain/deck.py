@@ -1,7 +1,7 @@
 import random
 
-from poker_domain.value_objects.card import Card, Suit, Rank
 from poker_domain.exceptions import DeckEmptyError
+from poker_domain.value_objects.card import Card, Rank, Suit
 
 
 class Deck:

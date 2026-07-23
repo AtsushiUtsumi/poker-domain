@@ -1,5 +1,5 @@
-from itertools import combinations
 from collections import Counter
+from itertools import combinations
 
 from poker_domain.value_objects.card import Card, Rank, Suit
 from poker_domain.value_objects.community_cards import CommunityCards
@@ -12,7 +12,17 @@ class HandEvaluator:
 
     @staticmethod
     def evaluate(cards: tuple[Card, ...]) -> Hand:
-        """7枚(ホール2枚 + コミュニティ5枚)から最強の手を返す"""
+        """5枚以上のカードから最も強い5枚の組み合わせを `Hand` として返す。
+
+        Args:
+            cards: 評価対象のカード (通常はホール2枚 + コミュニティ5枚の7枚)。
+
+        Returns:
+            最強の5枚を表す `Hand`。
+
+        Raises:
+            ValueError: `cards` が5枚未満の場合。
+        """
         if len(cards) < 5:
             raise ValueError("役を判定するには5枚以上のカードが必要です")
         best: Hand | None = None
@@ -25,17 +35,40 @@ class HandEvaluator:
 
     @staticmethod
     def evaluate_hand(hole_cards: HoleCards, community_cards: CommunityCards) -> Hand:
-        """手札とコミュニティカードを合わせた現状の役を返す (合計5枚未満の場合は評価不可)"""
+        """手札とコミュニティカードを合わせた現状の役を返す。
+
+        Args:
+            hole_cards: プレイヤーのホールカード。
+            community_cards: 場のコミュニティカード。
+
+        Returns:
+            現時点で成立している最強の `Hand`。
+
+        Raises:
+            ValueError: 合計が5枚未満の場合。
+        """
         return HandEvaluator.evaluate(tuple(hole_cards) + tuple(community_cards))
 
     @staticmethod
-    def river_probabilities(hole_cards: HoleCards, community_cards: CommunityCards) -> dict[HandRank, float]:
-        """
-        リバーまでに残りのカードを全数列挙し、最終的な役 (HandRank) ごとの成立確率を返す。
-        コミュニティカードが0枚 (プリフロップ) の場合は計算不可のため ValueError を送出する。
+    def river_probabilities(
+        hole_cards: HoleCards, community_cards: CommunityCards
+    ) -> dict[HandRank, float]:
+        """リバーまでに残りのカードを全数列挙し、役ごとの最終成立確率を返す。
+
+        Args:
+            hole_cards: プレイヤーのホールカード。
+            community_cards: 場のコミュニティカード (1枚以上必要)。
+
+        Returns:
+            `HandRank` ごとの成立確率 (`HandRank` 全メンバーを網羅した dict)。
+
+        Raises:
+            ValueError: `community_cards` が0枚 (プリフロップ) の場合。
         """
         if len(community_cards) == 0:
-            raise ValueError("river_probabilities はコミュニティカードが1枚以上の場合のみ計算できます")
+            raise ValueError(
+                "river_probabilities はコミュニティカードが1枚以上の場合のみ計算できます"
+            )
 
         known = set(community_cards) | set(hole_cards)
         remaining = tuple(
@@ -62,10 +95,19 @@ class HandEvaluator:
 
     @staticmethod
     def classify_category(cards: tuple[Card, ...]) -> HandRank:
-        """
-        5枚以上のカードから、最も強い5枚の組み合わせの役カテゴリだけを判定する。
-        evaluate() と違い、全 C(n,5) 組み合わせを列挙せずタイブレーカーも算出しないため、
+        """5枚以上のカードから、最も強い5枚の組み合わせの役カテゴリだけを判定する。
+
+        `evaluate()` と違い、全 C(n,5) 組み合わせを列挙せずタイブレーカーも算出しないため、
         確率分布計算のように大量呼び出しが必要で役カテゴリのみあれば足りる用途に向く。
+
+        Args:
+            cards: 判定対象のカード (5枚以上)。
+
+        Returns:
+            成立している最も強い役の `HandRank`。
+
+        Raises:
+            ValueError: `cards` が5枚未満の場合。
         """
         if len(cards) < 5:
             raise ValueError("役を判定するには5枚以上のカードが必要です")
@@ -112,7 +154,15 @@ class HandEvaluator:
 
     @staticmethod
     def compare(hand_a: Hand, hand_b: Hand) -> int:
-        """正: hand_a が強い / 負: hand_b が強い / 0: 同じ強さ"""
+        """2つの `Hand` の強さを比較する。
+
+        Args:
+            hand_a: 比較対象1。
+            hand_b: 比較対象2。
+
+        Returns:
+            正なら `hand_a` が強い、負なら `hand_b` が強い、0 で同点。
+        """
         if hand_a.rank != hand_b.rank:
             return hand_a.rank - hand_b.rank
         # 同ランク → tiebreakers で比較
@@ -161,7 +211,9 @@ class HandEvaluator:
         if count_pattern == (3, 1, 1):
             trips_rank = by_count[0][0]
             kickers = sorted([r for r, c in by_count if c == 1], reverse=True)
-            return Hand(cards=cards, rank=HandRank.THREE_OF_A_KIND, tiebreakers=(trips_rank, *kickers))
+            return Hand(
+                cards=cards, rank=HandRank.THREE_OF_A_KIND, tiebreakers=(trips_rank, *kickers)
+            )
 
         if count_pattern == (2, 2, 1):
             pairs = sorted([r for r, c in by_count if c == 2], reverse=True)

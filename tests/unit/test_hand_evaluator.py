@@ -1,6 +1,7 @@
 from poker_domain.hand_evaluator import HandEvaluator
-from poker_domain.value_objects.card import Card, Suit, Rank
+from poker_domain.value_objects.card import Card, Rank, Suit
 from poker_domain.value_objects.hand import HandRank
+
 
 def create_cards(card_strs):
     """
@@ -88,7 +89,9 @@ def test_compare_hands():
 
     # Same rank, kicker difference
     # Correcting inputs for precise comparison test
-    h1 = HandEvaluator.evaluate(create_cards(["Ah", "Ad", "Ks", "9c", "8d", "2c", "3s"])) # Pair A, Kickers K, 9, 8
-    h2 = HandEvaluator.evaluate(create_cards(["Ah", "Ad", "Ks", "7c", "6d", "2c", "3s"])) # Pair A, Kickers K, 7, 6
+    # Pair A, Kickers K, 9, 8
+    h1 = HandEvaluator.evaluate(create_cards(["Ah", "Ad", "Ks", "9c", "8d", "2c", "3s"]))
+    # Pair A, Kickers K, 7, 6
+    h2 = HandEvaluator.evaluate(create_cards(["Ah", "Ad", "Ks", "7c", "6d", "2c", "3s"]))
     
     assert HandEvaluator.compare(h1, h2) > 0

@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import Union
 
 
 @dataclass(frozen=True)
@@ -27,4 +26,4 @@ class Raise:
     amount: int
 
 
-Action = Union[Fold, Check, Call, Bet, Raise]
+Action = Fold | Check | Call | Bet | Raise

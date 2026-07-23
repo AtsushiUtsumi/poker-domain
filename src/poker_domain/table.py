@@ -1,41 +1,43 @@
+from poker_domain.deck import Deck
+from poker_domain.exceptions import (
+    GameAlreadyStartedError,
+    InsufficientChipsError,
+    InvalidActionError,
+    InvalidBuyInError,
+    InvalidPlayerError,
+    NotEnoughPlayersError,
+    RebuyNotAllowedError,
+    TableClosedError,
+    TableFullError,
+)
+from poker_domain.game_state import (
+    ActionLogEntry,
+    ActionResult,
+    EventType,
+    GameEvent,
+    GamePhase,
+    GameState,
+    PlayerState,
+    Pot,
+    TableStatus,
+    WaitingFor,
+)
+from poker_domain.hand_evaluator import HandEvaluator
 from poker_domain.interfaces import PokerTableInterface
-from poker_domain.value_objects.action import Action, Fold, Check, Call, Bet, Raise
+from poker_domain.player import Player
+from poker_domain.value_objects.action import Action, Bet, Call, Check, Fold, Raise
 from poker_domain.value_objects.chips import Chips
 from poker_domain.value_objects.community_cards import CommunityCards
 from poker_domain.value_objects.hand import Hand
 from poker_domain.value_objects.hole_cards import HoleCards
-from poker_domain.game_state import (
-    GamePhase,
-    GameEvent,
-    EventType,
-    GameState,
-    ActionResult,
-    WaitingFor,
-    PlayerState,
-    TableStatus,
-    Pot,
-    ActionLogEntry,
-)
-from poker_domain.player import Player
-from poker_domain.deck import Deck
-from poker_domain.hand_evaluator import HandEvaluator
-from poker_domain.exceptions import (
-    InvalidActionError,
-    InsufficientChipsError,
-    InvalidPlayerError,
-    TableFullError,
-    NotEnoughPlayersError,
-    GameAlreadyStartedError,
-    TableClosedError,
-    RebuyNotAllowedError,
-    InvalidBuyInError,
-)
 
 
 class PokerTable(PokerTableInterface):
-    """
-    テーブルの集約ルート。
-    全ゲームロジックはここに閉じる。
+    """テーブルの集約ルート。全ゲームロジックはここに閉じる。
+
+    外部からの窓口は `PokerTableInterface` に定義されたメソッドのみ。
+    状態は `GameState` などの frozen dataclass によるイミュータブルな
+    スナップショットとして返される。
     """
 
     def __init__(
@@ -53,6 +55,26 @@ class PokerTable(PokerTableInterface):
         allow_rebuy: bool = True,
         fixed_buy_in: int | None = None,
     ) -> None:
+        """テーブルを初期化する。
+
+        Args:
+            table_id: テーブルを一意に識別するID。
+            max_players: 着席可能な最大人数。
+            small_blind: `level_schedule` 未指定時のスモールブラインド額。
+            big_blind: `level_schedule` 未指定時のビッグブラインド額。
+            ante: `level_schedule` 未指定時のアンティ額。
+            timeout_seconds: 1アクションあたりの持ち時間 (秒)。
+            level_schedule: `[(small_blind, big_blind, ante), ...]` の
+                レベルスケジュール。未指定時は `small_blind`/`big_blind`/`ante`
+                を単一レベルとして使う。
+            rake_percent: ポット合計に対するレーキ率 (例: `0.05` = 5%)。
+            rake_cap: レーキの上限額。未指定なら上限なし。
+            rake_min_pot: この額に満たないポットからはレーキを取らない。
+            allow_rebuy: `False` の場合、バスト済みプレイヤーIDは
+                `add_player()` で再参加できず `RebuyNotAllowedError` になる。
+            fixed_buy_in: 指定時は `add_player()` の `chips` がこの額と
+                完全一致する場合のみ参加できる。
+        """
         self._table_id = table_id
         self._max_players = max_players
         self._timeout_seconds = timeout_seconds
@@ -70,7 +92,9 @@ class PokerTable(PokerTableInterface):
         self._rake_min_pot = rake_min_pot
 
         # レベルスケジュール: [(small_blind, big_blind, ante), ...]。未指定時は固定額の単一レベル
-        self._level_schedule: list[tuple[int, int, int]] = level_schedule or [(small_blind, big_blind, ante)]
+        self._level_schedule: list[tuple[int, int, int]] = (
+            level_schedule or [(small_blind, big_blind, ante)]
+        )
         self._level: int = 0
         self._small_blind = Chips(self._level_schedule[0][0])
         self._big_blind = Chips(self._level_schedule[0][1])
@@ -98,6 +122,23 @@ class PokerTable(PokerTableInterface):
     # ─── プレイヤー管理 ───
 
     def add_player(self, player_id: str, chips: Chips) -> GameEvent:
+        """プレイヤーを着席させる。
+
+        Args:
+            player_id: プレイヤーを一意に識別するID。
+            chips: 持ち込みチップ額。
+
+        Returns:
+            `EventType.PLAYER_JOINED` の `GameEvent`。
+
+        Raises:
+            TableClosedError: テーブルがクローズしている場合。
+            TableFullError: 満席の場合。
+            GameAlreadyStartedError: ハンド進行中の場合。
+            InvalidPlayerError: 同じ `player_id` が既に参加している場合。
+            RebuyNotAllowedError: リバイ禁止テーブルでバスト済みIDの場合。
+            InvalidBuyInError: `fixed_buy_in` 設定時に額が一致しない場合。
+        """
         if self._closed:
             raise TableClosedError("テーブルはクローズしています")
         if len(self._players) >= self._max_players:
@@ -107,7 +148,9 @@ class PokerTable(PokerTableInterface):
         if any(p.player_id == player_id for p in self._players):
             raise InvalidPlayerError(f"{player_id} は既に参加しています")
         if not self._allow_rebuy and player_id in self._busted_player_ids:
-            raise RebuyNotAllowedError(f"{player_id} はバスト済みのためリバイ禁止テーブルに再参加できません")
+            raise RebuyNotAllowedError(
+                f"{player_id} はバスト済みのためリバイ禁止テーブルに再参加できません"
+            )
         if self._fixed_buy_in is not None and chips.amount != self._fixed_buy_in:
             raise InvalidBuyInError(f"バイインは {self._fixed_buy_in} 固定です")
 
@@ -119,11 +162,26 @@ class PokerTable(PokerTableInterface):
         )
 
     def remove_player(self, player_id: str) -> GameEvent:
+        """プレイヤーを離席させる。
+
+        Args:
+            player_id: 離席させるプレイヤーのID。
+
+        Returns:
+            `EventType.PLAYER_LEFT` の `GameEvent`。
+
+        Raises:
+            GameAlreadyStartedError: ハンド進行中の場合。
+
+        Note:
+            全員離脱すると卓は自動的にクローズする。
+        """
         if self._phase not in (GamePhase.WAITING, GamePhase.SHOWDOWN):
             raise GameAlreadyStartedError("ゲーム進行中には離開できません")
 
         # 除外前に現在のカレントプレイヤー/ディーラーをオブジェクトとして覚えておき、
-        # 縮小後のリストに対してインデックスを引き直す (該当者自身が離脱した場合は 0 にフォールバック)
+        # 縮小後のリストに対してインデックスを引き直す
+        # (該当者自身が離脱した場合は 0 にフォールバック)
         current_player = self._players[self._current_player_index] if self._players else None
         dealer_player = self._players[self._dealer_index] if self._players else None
 
@@ -151,10 +209,19 @@ class PokerTable(PokerTableInterface):
     # ─── ゲーム開始 ───
 
     def start_game(self) -> ActionResult:
-        """
-        ハンドを開始する。
-        WAITING: 初回開始
-        SHOWDOWN: 前のハンド終了後 → ディーラーを回してから次のハンド開始
+        """ハンドを開始する (アンティ・ブラインド徴収 → ホールカード配布 → PRE_FLOP開始)。
+
+        `WAITING` からは初回開始、`SHOWDOWN` からは前のハンド終了後の
+        後片付け (ディーラーを回す・チップ0のプレイヤーを除外) を行ってから
+        次のハンドを開始する。
+
+        Returns:
+            開始直後の状態を含む `ActionResult`。
+
+        Raises:
+            TableClosedError: テーブルがクローズしている場合。
+            GameAlreadyStartedError: 既にハンドが進行中の場合。
+            NotEnoughPlayersError: 参加人数が2人未満の場合。
         """
         if self._closed:
             raise TableClosedError("テーブルはクローズしています")
@@ -166,7 +233,8 @@ class PokerTable(PokerTableInterface):
         # ── 前ハンド終了後の後片付け ──
         if self._phase == GamePhase.SHOWDOWN:
             n = len(self._players)
-            # 現ディーラーの次の座席から順に、チップが残っている最初のプレイヤーを次のディーラーにする
+            # 現ディーラーの次の座席から順に、チップが残っている最初のプレイヤーを
+            # 次のディーラーにする
             seating_order = [self._players[(self._dealer_index + 1 + i) % n] for i in range(n)]
             next_dealer = next((p for p in seating_order if p.chips.amount > 0), None)
 
@@ -230,6 +298,20 @@ class PokerTable(PokerTableInterface):
     # ─── アクション ───
 
     def action(self, player_id: str, action: Action) -> ActionResult:
+        """現在の手番プレイヤーのアクションを適用し、次の状態を返す。
+
+        Args:
+            player_id: アクションを取るプレイヤーのID (現在の手番と一致する必要がある)。
+            action: `Fold` / `Check` / `Call` / `Bet` / `Raise` のいずれか。
+
+        Returns:
+            適用後の状態を含む `ActionResult`。
+
+        Raises:
+            InvalidActionError: ゲームが進行中でない、またはルール上無効なアクションの場合。
+            InvalidPlayerError: 現在の手番と異なる `player_id` の場合。
+            InsufficientChipsError: `Bet`/`Raise` でチップが不足する場合。
+        """
         if self._phase in (GamePhase.WAITING, GamePhase.SHOWDOWN):
             raise InvalidActionError("ゲームが進行中ではありません")
 
@@ -281,9 +363,23 @@ class PokerTable(PokerTableInterface):
     # ─── ステート取得 ───
 
     def get_state(self, viewer_player_id: str | None = None) -> GameState:
+        """現在の状態のスナップショットを取得する。
+
+        Args:
+            viewer_player_id: 指定すると、そのプレイヤーのホールカードのみ
+                公開される (`SHOWDOWN` では全員分が公開される)。
+
+        Returns:
+            現在の `GameState` スナップショット。
+        """
         return self._snapshot(viewer_player_id)
 
     def get_table_status(self) -> TableStatus:
+        """テーブルのライフサイクル状態を返す。
+
+        Returns:
+            `RECRUITING` / `PLAYING` / `CLOSED` / `OTHER` のいずれか。
+        """
         if self._closed:
             return TableStatus.CLOSED
         if self._phase in (GamePhase.WAITING, GamePhase.SHOWDOWN):
@@ -416,6 +512,13 @@ class PokerTable(PokerTableInterface):
     # ── レベル ──
 
     def level_up(self) -> GameEvent:
+        """SB/BB/アンティをまとめて1段階上昇させる (次のハンドから適用)。
+
+        最終レベルに到達している場合は据え置きになる。
+
+        Returns:
+            `EventType.LEVEL_UP` の `GameEvent` (現在のレベルとSB/BB/アンティを含む)。
+        """
         if self._level < len(self._level_schedule) - 1:
             self._level += 1
             sb, bb, ante = self._level_schedule[self._level]
@@ -495,9 +598,10 @@ class PokerTable(PokerTableInterface):
             self._phase = next_phase[self._phase]
             match self._phase:
                 case GamePhase.FLOP:
-                    self._community_cards = CommunityCards(self._community_cards + self._deck.deal(3))
+                    dealt = self._deck.deal(3)
                 case GamePhase.TURN | GamePhase.RIVER:
-                    self._community_cards = CommunityCards(self._community_cards + self._deck.deal(1))
+                    dealt = self._deck.deal(1)
+            self._community_cards = CommunityCards(self._community_cards + dealt)
             events.append(GameEvent(
                 event_type=EventType.COMMUNITY_DEALT,
                 payload={"community_cards": self._community_cards},
@@ -573,7 +677,7 @@ class PokerTable(PokerTableInterface):
         self._reset_contributions()
         self._record_busted_players()
 
-        winner_id = max(payouts, key=payouts.get) if payouts else None
+        winner_id = max(payouts, key=lambda pid: payouts[pid]) if payouts else None
         events.append(GameEvent(
             event_type=EventType.SHOWDOWN,
             payload={

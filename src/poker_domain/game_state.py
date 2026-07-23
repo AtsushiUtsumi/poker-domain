@@ -3,7 +3,6 @@ from enum import Enum
 from typing import Any
 
 from poker_domain.value_objects.chips import Chips
-from poker_domain.value_objects.action import Action
 from poker_domain.value_objects.community_cards import CommunityCards
 from poker_domain.value_objects.hole_cards import HoleCards
 

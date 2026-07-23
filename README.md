@@ -12,24 +12,36 @@ pip install -e .
 
 - Python 3.10 以上が必要 (`match` 文、`X | Y` 型ヒントを使用)
 - 依存パッケージなし
+- ビルドバックエンドは `hatchling`。`src` レイアウトだが `pip install -e .` の使い方自体は変わらない
+- ライセンスは MIT ([LICENSE](./LICENSE) 参照)
 
 ## パッケージ構成
 
+`src` レイアウトを採用しています (PEP 561 準拠、`py.typed` で型ヒント対応を明示)。
+外部からの `import poker_domain` としての参照パスは変わりません。
+
 ```
 poker_domain/
-├── __init__.py          # 公開 API のエクスポート
-├── interfaces.py        # PokerTableInterface (抽象基底クラス)
-├── table.py             # PokerTable (集約ルート・全ゲームロジック)
-├── player.py            # Player (エンティティ)
-├── deck.py              # Deck (52枚のカードデック)
-├── hand_evaluator.py    # HandEvaluator (役の判定・比較)
-├── game_state.py        # GameState などの不変スナップショット/イベント型
-├── exceptions.py        # 例外階層
-└── value_objects/
-    ├── action.py        # Fold / Check / Call / Bet / Raise
-    ├── card.py          # Card / Suit / Rank
-    ├── chips.py         # Chips (非負整数のチップ量)
-    └── hand.py          # Hand / HandRank
+├── src/
+│   └── poker_domain/
+│       ├── __init__.py          # 公開 API のエクスポート
+│       ├── py.typed             # PEP 561 マーカー (型ヒント対応の明示)
+│       ├── interfaces.py        # PokerTableInterface (抽象基底クラス)
+│       ├── table.py             # PokerTable (集約ルート・全ゲームロジック)
+│       ├── player.py            # Player (エンティティ)
+│       ├── deck.py              # Deck (52枚のカードデック)
+│       ├── hand_evaluator.py    # HandEvaluator (役の判定・比較)
+│       ├── game_state.py        # GameState などの不変スナップショット/イベント型
+│       ├── exceptions.py        # 例外階層
+│       └── value_objects/
+│           ├── action.py        # Fold / Check / Call / Bet / Raise
+│           ├── card.py          # Card / Suit / Rank
+│           ├── chips.py         # Chips (非負整数のチップ量)
+│           └── hand.py          # Hand / HandRank
+├── tests/
+├── pyproject.toml
+├── LICENSE
+└── CHANGELOG.md
 ```
 
 ## アーキテクチャ
@@ -291,9 +303,21 @@ print(table.get_table_status())       # TableStatus.RECRUITING (SHOWDOWN/WAITING
 ## テスト
 
 ```bash
+pip install -e ".[dev,test]"
 pytest
 ```
 
 - `tests/unit/`: `Deck` / `Chips` / `Card` / `HandEvaluator` / ゲーム進行 /
   テーブルのライフサイクル(レベル管理・クローズ・サイドポット・レーキ)の単体テスト
 - `tests/scenarios/`: `PokerTable` を通した一連のハンド進行のシナリオテスト
+
+## 品質管理
+
+```bash
+ruff check .
+mypy src/poker_domain
+```
+
+## ライセンス
+
+MIT License。詳細は [LICENSE](./LICENSE) を参照してください。
