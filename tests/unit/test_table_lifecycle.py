@@ -2,7 +2,12 @@ from unittest.mock import patch
 
 import pytest
 
-from poker_domain.exceptions import InvalidBuyInError, RebuyNotAllowedError, TableClosedError
+from poker_domain.exceptions import (
+    InvalidActionError,
+    InvalidBuyInError,
+    RebuyNotAllowedError,
+    TableClosedError,
+)
 from poker_domain.game_state import GamePhase, TableStatus
 from poker_domain.table import PokerTable
 from poker_domain.value_objects.action import Call, Check, Fold, Raise
@@ -243,6 +248,43 @@ def test_side_pot_distribution_for_uneven_all_in():
         assert chips_by_id["a"] == 45       # 0 (all-in) + 45
         assert chips_by_id["b"] == 1000 - 100 + 170
         assert chips_by_id["c"] == 1000 - 100
+
+
+def test_short_stack_can_raise_all_in_below_min_raise():
+    """最小レイズ額に満たなくても、保有チップ全額でのレイズ (ショートオールイン) は合法"""
+    table = PokerTable(
+        table_id="t1", max_players=3, small_blind=10, big_blind=20,
+    )
+    table.add_player("a", Chips(25))  # ショートスタック
+    table.add_player("b", Chips(1000))
+    table.add_player("c", Chips(1000))
+
+    result = table.start_game()
+    # 3人卓: dealer=a, SB=b(10), BB=c(20), 開始プレイヤー=a
+    assert result.state.current_player_id == "a"
+    assert result.state.current_bet.amount == 20
+
+    # 最小レイズは 40 (current_bet=20 の2倍) だが、a の保有チップは 25 しかない
+    result = table.action("a", Raise(amount=25))
+    a_state = result.state.players[0]
+    assert a_state.is_all_in is True
+    assert a_state.chips.amount == 0
+    assert result.state.current_bet.amount == 25
+    assert result.state.pot.amount == 10 + 20 + 25
+
+
+def test_raise_below_min_raise_still_rejected_when_not_all_in():
+    """保有チップが十分にある場合、最小レイズ未満のレイズは引き続き拒否される"""
+    table = PokerTable(
+        table_id="t1", max_players=2, small_blind=10, big_blind=20,
+    )
+    table.add_player("a", Chips(1000))
+    table.add_player("b", Chips(1000))
+
+    table.start_game()
+    # ヘッズアップ: dealer=a=SB, b=BB, 開始プレイヤー=a
+    with pytest.raises(InvalidActionError):
+        table.action("a", Raise(amount=30))  # 最小レイズ40未満で、かつ全額でもない
 
 
 def test_rake_is_deducted_at_showdown():

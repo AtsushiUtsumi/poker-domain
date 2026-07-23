@@ -417,9 +417,10 @@ class PokerTable(PokerTableInterface):
                     raise InsufficientChipsError("チップ不足です")
             case Raise(amount=amount):
                 min_raise = self._current_bet.amount * 2
-                if amount < min_raise:
-                    raise InvalidActionError(f"最小レイズは {min_raise} です")
                 diff = amount - player.current_bet.amount
+                is_all_in_raise = diff == player.chips.amount
+                if amount < min_raise and not is_all_in_raise:
+                    raise InvalidActionError(f"最小レイズは {min_raise} です")
                 if diff > player.chips.amount:
                     raise InsufficientChipsError("チップ不足です")
 
