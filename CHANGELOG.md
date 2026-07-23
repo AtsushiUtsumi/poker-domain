@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-07-23
+
+### Fixed
+
+- Fixed a bug where collecting antes leaked into `Player.current_bet`, causing the table's
+  `current_bet` and the big blind player's `current_bet` to disagree. In rare cases this let
+  a `Call()` be applied with a negative amount, raising an unhandled `ValueError` and freezing
+  the hand. `Player._contribute()` now takes an `affects_current_bet` flag, and ante collection
+  passes `affects_current_bet=False` so antes only add to the pot/`total_contributed`, not to
+  `current_bet`. Added a defensive guard in `PokerTable._validate_action` that rejects `Call()`
+  with `InvalidActionError` instead of crashing if a player has already contributed more than
+  the table's `current_bet` (should no longer be reachable, but fails safely if it recurs).
+
 ## [0.2.0] - 2026-07-23
 
 ### Changed

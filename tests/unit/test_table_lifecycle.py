@@ -86,6 +86,30 @@ def test_level_up_ante_is_collected_at_next_hand():
     assert result.state.pot.amount == 40
 
 
+def test_ante_does_not_leak_into_current_bet():
+    """アンティはポットに積まれるだけで current_bet には反映されず、
+    誰も再レイズしなければBBはコールではなくチェックできる (回帰テスト:
+    以前はアンティが current_bet に混入し、BBのコールが `Chips(-5)` の
+    ValueError で未処理例外になっていた)"""
+    table = PokerTable(table_id="t1", max_players=2, small_blind=10, big_blind=20, ante=5)
+    table.add_player("a", Chips(1000))
+    table.add_player("b", Chips(1000))
+
+    result = table.start_game()
+    # heads-up: dealer(a)=SB から開始
+    assert result.state.current_player_id == "a"
+    assert result.state.current_bet == Chips(20)
+    assert result.waiting_for.valid_actions == (Fold, Call, Raise)
+
+    result = table.action("a", Call())
+    assert result.state.current_player_id == "b"
+    # アンティ分がcurrent_betに混入していれば Call が提示されてしまう
+    assert result.waiting_for.valid_actions == (Fold, Check, Raise)
+
+    result = table.action("b", Check())
+    assert result.state.phase == GamePhase.FLOP
+
+
 def test_table_closes_when_all_players_leave():
     table = PokerTable(table_id="t1", max_players=2)
     assert table.get_table_status() == TableStatus.RECRUITING

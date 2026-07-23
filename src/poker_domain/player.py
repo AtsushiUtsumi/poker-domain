@@ -24,15 +24,20 @@ class Player:
         self.is_all_in = False
         self.total_contributed = Chips(0)
 
-    def _contribute(self, amount: int) -> int:
+    def _contribute(self, amount: int, *, affects_current_bet: bool = True) -> int:
         """
         チップを拠出する (ブラインド/アンティ/コール/ベット/レイズの共通処理)。
         保有チップ不足の場合は保有額全額に切り詰め、拠出後に0になれば is_all_in にする。
         実際に拠出された額を返す (呼び出し側でポット加算に使う)。
+
+        `current_bet` はそのストリートで「対抗するために積んだ額」を表すため、
+        ブラインド/コール/ベット/レイズでは加算するが、アンティは対抗額ではない
+        ので `affects_current_bet=False` で呼び出し current_bet を変化させない。
         """
         paid = min(amount, self.chips.amount)
         self.chips = Chips(self.chips.amount - paid)
-        self.current_bet = self.current_bet + Chips(paid)
+        if affects_current_bet:
+            self.current_bet = self.current_bet + Chips(paid)
         self.total_contributed = self.total_contributed + Chips(paid)
         if self.chips.amount == 0:
             self.is_all_in = True

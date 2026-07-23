@@ -402,7 +402,11 @@ class PokerTable(PokerTableInterface):
                 if player.current_bet < self._current_bet:
                     raise InvalidActionError("ベット額が足りません。コールが必要です")
             case Call():
-                pass  # チップが足りない場合は保有額全額でのオールインコールとして成立させる
+                # チップが足りない場合は保有額全額でのオールインコールとして成立させる。
+                # 一方、既に必要額以上を拠出済み (本来はcallではなくcheckが提示されるべき局面)
+                # での呼び出しは、状態不整合の防衛線として明示的に弾く
+                if player.current_bet.amount > self._current_bet.amount:
+                    raise InvalidActionError("既に必要額以上を拠出済みです")
             case Bet(amount=amount):
                 if self._current_bet.amount > 0:
                     raise InvalidActionError("既にベットがある場合は Raise を使ってください")
@@ -506,7 +510,7 @@ class PokerTable(PokerTableInterface):
         if self._ante.amount <= 0:
             return
         for player in self._players:
-            paid = player._contribute(self._ante.amount)
+            paid = player._contribute(self._ante.amount, affects_current_bet=False)
             self._pot = self._pot + Chips(paid)
 
     # ── レベル ──
